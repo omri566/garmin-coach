@@ -57,6 +57,13 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             errors.append(f"[test] could not change run selector: {e}")
 
+        # Coach tab (display only — don't click the slow generate buttons).
+        try:
+            page.get_by_text("Coach", exact=True).first.click()
+            time.sleep(1.5)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"[test] could not click Coach: {e}")
+
         # Back to Overview.
         try:
             page.get_by_text("Overview", exact=True).first.click()

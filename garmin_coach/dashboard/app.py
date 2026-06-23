@@ -13,7 +13,7 @@ import dash_mantine_components as dmc
 from dash import Input, Output, _dash_renderer, callback, html
 
 from garmin_coach.dashboard import figures
-from garmin_coach.dashboard.pages import analysis, overview
+from garmin_coach.dashboard.pages import analysis, coach, overview
 
 _dash_renderer._set_react_version("18.2.0")
 
@@ -38,10 +38,12 @@ def shell():
                 dmc.SegmentedControl(
                     id="tab-switch", value="overview", mb="md", color="blue",
                     data=[{"label": "Overview", "value": "overview"},
-                          {"label": "Deep Analysis", "value": "analysis"}],
+                          {"label": "Deep Analysis", "value": "analysis"},
+                          {"label": "Coach", "value": "coach"}],
                 ),
                 html.Div(overview.layout(), id="tab-overview"),
                 html.Div(analysis.layout(), id="tab-analysis", style=_HIDE),
+                html.Div(coach.layout(), id="tab-coach", style=_HIDE),
                 dmc.Space(h="xl"),
             ], fluid=True, style={"paddingBottom": "2rem"}),
         ),
@@ -49,12 +51,15 @@ def shell():
 
 
 @callback(Output("tab-overview", "style"), Output("tab-analysis", "style"),
-          Input("tab-switch", "value"))
+          Output("tab-coach", "style"), Input("tab-switch", "value"))
 def switch_tab(tab):
-    return (_SHOW, _HIDE) if tab == "overview" else (_HIDE, _SHOW)
+    return (_SHOW if tab == "overview" else _HIDE,
+            _SHOW if tab == "analysis" else _HIDE,
+            _SHOW if tab == "coach" else _HIDE)
 
 
 app.layout = shell
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8050)
+    # threaded so a slow LLM callback doesn't block the whole UI.
+    app.run(debug=True, port=8050, threaded=True)

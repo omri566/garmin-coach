@@ -40,6 +40,18 @@ days are re-tried until Garmin finalizes their overnight metrics.
 
 Incremental and safe to re-run — this is what a scheduled job calls.
 
+## Coaching (Phase 4)
+
+AI runs through the local **Claude Code CLI** (`claude -p`) — no API key needed.
+
+```bash
+.venv/bin/python -m garmin_coach.knowledge.research          # build cited knowledge base (slow, periodic)
+.venv/bin/python -m garmin_coach.coach.recommend             # science-backed recommendations over your data
+.venv/bin/python -m garmin_coach.coach.plan --goal "sub-50 10k" --date 2026-10-15
+```
+
+Recommendations + plan are also generated from the dashboard's **Coach** tab.
+
 ## Analytics & dashboard
 
 ```bash
@@ -56,5 +68,5 @@ Incremental and safe to re-run — this is what a scheduled job calls.
 ## Status
 - **Phase 1 (ingest + storage) — complete.** Activities + daily health, incremental, max-fidelity.
 - **Phase 2 (analytics) — core complete.** Per-activity features, CTL/ATL/TSB/ACWR load model, trend layer.
-- **Phase 3 (dashboard) — Overview + Deep Analysis pages live.** Multi-page Dash app: Overview (fitness/fatigue/form, ACWR, last-run, volume, zones, EF/VO₂max) and Deep Analysis (per-run splits, pace/HR/cadence drift, decoupling, technique vs reference), all with per-metric hover explanations.
-- Next: Phase 4 (goal-driven plan, science-backed recommendations, deep-research knowledge base).
+- **Phase 3 (dashboard) — Overview + Deep Analysis + Coach tabs live.** Single-page tabbed Dash app with per-metric hover explanations; UI guarded by a headless-browser smoke test (`tools/browser_check.py`).
+- **Phase 4 (coaching) — complete.** No-API-key LLM provider (`claude -p`), deep-research cited knowledge base, science-backed recommendations, and goal-driven adaptive plans — all surfaced in the Coach tab (you-in-the-loop).
