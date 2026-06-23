@@ -1,0 +1,10 @@
+garminconnect
+garth
+fitparse
+pandas
+numpy
+pyarrow
+python-dotenv
+dash
+dash-mantine-components
+plotly
