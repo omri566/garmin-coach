@@ -56,5 +56,5 @@ Incremental and safe to re-run — this is what a scheduled job calls.
 ## Status
 - **Phase 1 (ingest + storage) — complete.** Activities + daily health, incremental, max-fidelity.
 - **Phase 2 (analytics) — core complete.** Per-activity features, CTL/ATL/TSB/ACWR load model, trend layer.
-- **Phase 3 (dashboard) — Overview page live.** Fitness/Fatigue/Form, ACWR, last-run card, weekly volume, HR-zone mix, EF & VO₂max trends.
-- Next: Deep Analysis page (splits, technique drill-down), then Phase 4 (plan, recommendations, knowledge base).
+- **Phase 3 (dashboard) — Overview + Deep Analysis pages live.** Multi-page Dash app: Overview (fitness/fatigue/form, ACWR, last-run, volume, zones, EF/VO₂max) and Deep Analysis (per-run splits, pace/HR/cadence drift, decoupling, technique vs reference), all with per-metric hover explanations.
+- Next: Phase 4 (goal-driven plan, science-backed recommendations, deep-research knowledge base).

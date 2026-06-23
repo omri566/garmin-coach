@@ -74,6 +74,52 @@ def latest_vo2max() -> float | None:
     return row[0] if row else None
 
 
+def run_options(limit: int = 100) -> list[dict]:
+    """Recent runs for the activity selector (label/value pairs)."""
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT activity_id, start_time, distance_m FROM activity_metrics "
+            "WHERE sport LIKE '%running%' ORDER BY start_time DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        km = (r["distance_m"] or 0) / 1000.0
+        out.append({"value": str(r["activity_id"]),
+                    "label": f"{r['start_time'][:10]} · {km:.1f} km"})
+    return out
+
+
+def run_streams(activity_id):
+    from garmin_coach.store import streams
+    return streams.read_streams(int(activity_id))
+
+
+def run_metrics(activity_id) -> dict | None:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM activity_metrics WHERE activity_id = ?",
+            (int(activity_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def technique_baselines() -> dict:
+    """Personal median for each dynamics metric over runs that have them."""
+    cols = ["avg_cadence_spm", "avg_vert_ratio", "avg_gct_ms",
+            "avg_gct_balance", "avg_step_len_mm"]
+    with db.connect() as conn:
+        out = {}
+        for c in cols:
+            row = conn.execute(
+                f"SELECT {c} FROM activity_metrics WHERE {c} IS NOT NULL "
+                f"ORDER BY {c}"
+            ).fetchall()
+            vals = [r[0] for r in row]
+            out[c] = vals[len(vals) // 2] if vals else None
+    return out
+
+
 def last_run() -> dict | None:
     """Latest running activity: metrics row + name/raw from the summary."""
     with db.connect() as conn:

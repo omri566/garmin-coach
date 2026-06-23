@@ -96,6 +96,47 @@ def zone_donut(df) -> go.Figure:
     return fig
 
 
+def drift_pace_hr(df, height: int = 360) -> go.Figure:
+    """Intra-run pace (reversed: up = faster) and HR vs distance."""
+    fig = _base(height=height)
+    if df is None or df.empty:
+        return fig
+    fig.add_scatter(x=df["distance_km"], y=df["pace_s_km"], name="Pace",
+                    line=dict(color=BLUE, width=2))
+    fig.add_scatter(x=df["distance_km"], y=df["heart_rate"], name="Heart rate",
+                    line=dict(color=RED, width=1.8), yaxis="y2")
+    fig.update_layout(
+        xaxis=dict(title="distance (km)"),
+        yaxis=dict(title="pace (s/km)", autorange="reversed"),
+        yaxis2=dict(title="HR", overlaying="y", side="right", showgrid=False),
+    )
+    return fig
+
+
+def cadence_drift(df, height: int = 300) -> go.Figure:
+    fig = _base(height=height)
+    if df is None or df.empty or "cadence_spm" not in df:
+        return fig
+    fig.add_scatter(x=df["distance_km"], y=df["cadence_spm"], name="Cadence",
+                    line=dict(color=GREEN, width=1.8))
+    fig.update_layout(xaxis=dict(title="distance (km)"),
+                      yaxis=dict(title="cadence (spm)"))
+    return fig
+
+
+def decoupling_bar(halves: dict, height: int = 300) -> go.Figure:
+    fig = _base(height=height)
+    if not halves:
+        return fig
+    fig.add_bar(x=["1st half", "2nd half"],
+                y=[halves["ef_first"], halves["ef_second"]],
+                marker_color=[BLUE, ORANGE], width=0.5,
+                text=[f"{halves['ef_first']:.2f}", f"{halves['ef_second']:.2f}"],
+                textposition="outside")
+    fig.update_layout(yaxis=dict(title="Efficiency (speed/HR)"), showlegend=False)
+    return fig
+
+
 def line_trend(df, col: str, label: str, color: str = TEAL,
                height: int = 300) -> go.Figure:
     fig = _base(height=height)
