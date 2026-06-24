@@ -18,6 +18,7 @@ import logging
 
 from garmin_coach import config
 from garmin_coach.coach import context
+from garmin_coach.coach import plan as plan_mod
 from garmin_coach.knowledge import kb
 from garmin_coach.llm import get_provider
 
@@ -30,8 +31,28 @@ SYSTEM = (
     "data and the provided knowledge base. Give specific, personal, actionable "
     "guidance — not generic tips. Cite the knowledge-base sources that justify "
     "each recommendation. Be honest about uncertainty and flag risks. You are "
-    "advising a human who will review and approve — propose, don't dictate."
+    "advising a human who will review and approve — propose, don't dictate. "
+    "If the athlete has an active plan, help them EXECUTE it: comment on today's "
+    "/ this week's planned sessions in light of current recovery, and if recovery "
+    "or load warrants a tweak, suggest it for the athlete's review — do NOT "
+    "redesign or replace the plan."
 )
+
+
+def _plan_context() -> tuple[str, str | None]:
+    """Condensed active-plan text + its goal, for plan-aware recommendations."""
+    plan = plan_mod.load_latest()
+    if not plan:
+        return "", None
+    lines = [f"# Active plan (do not redesign — help execute it)",
+             f"Goal: {plan.get('goal')} (target {plan.get('goal_date') or '—'})"]
+    for ph in plan.get("macro", [])[:6]:
+        lines.append(f"- {ph.get('weeks')}: {ph.get('phase')} — {ph.get('focus','')}")
+    for wk in plan.get("next_month", []):
+        sess = "; ".join(f"{s.get('day')} {s.get('type')} ({s.get('target','')})"
+                         for s in wk.get("sessions", []))
+        lines.append(f"  {wk.get('week')}: {sess}")
+    return "\n".join(lines), plan.get("goal")
 
 REC_SCHEMA = {
     "type": "object",
@@ -62,13 +83,19 @@ def recommend(goal: str | None = None, provider=None, model: str | None = None) 
     brief = context.brief_text()
     science = kb.kb_context() or "(knowledge base not built yet — rely on established models.)"
 
+    plan_block, plan_goal = _plan_context()
+    goal = goal or plan_goal
     goal_line = f"\nAthlete's stated goal: {goal}\n" if goal else ""
+    today_line = f"Today is {dt.date.today().isoformat()}.\n"
     prompt = (
-        f"{brief}\n{goal_line}\n"
+        f"{today_line}{brief}\n{goal_line}\n"
+        f"{plan_block}\n\n"
         f"# Evidence base (cite these by source name)\n{science}\n\n"
         "Assess this athlete's current state and give prioritised, cited "
         "recommendations. Ground every point in their actual numbers above, and "
-        "reference the evidence base where it applies."
+        "reference the evidence base where it applies. If there is an active plan, "
+        "include guidance on executing today's/this week's planned sessions given "
+        "current recovery — but do not rewrite the plan."
     )
     result = provider.generate_json(prompt, REC_SCHEMA, system=SYSTEM, model=model)
     result["generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
