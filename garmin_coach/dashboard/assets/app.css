@@ -1,0 +1,473 @@
+/* Garmin Coach — "Telemetry" theme.
+   A precision endurance instrument: Archivo signage + JetBrains Mono chronograph
+   readouts, graphite surfaces, one reserved amber accent, a running-track lane motif. */
+
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink:     #0E1217;
+  --ink-2:   #0B0F14;
+  --panel:   #151B23;
+  --panel-2: #1B2129;
+  --line:    #28313D;
+  --line-2:  #333E4C;
+  --text:    #E8EDF3;
+  --muted:   #93A1B1;
+  --faint:   #5E6B7A;
+  --amp:     #FFB02E;   /* signature chrome accent — stopwatch / track-light amber */
+  --amp-ink: #2A2110;
+}
+
+/* ---- base ---- */
+/* Root size drives every rem-based size (Mantine + our CSS); bumped from the
+   16px default so the whole UI reads larger and clearer. */
+html { font-size: 18px; }
+
+html, body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: 'Archivo', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* tabular, chronograph-style numerics everywhere by default for mono spans */
+.mono, .gc-stat, .gc-readout {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+}
+
+/* ---- app shell ---- */
+.gc-shell { max-width: 1320px; margin: 0 auto; padding: 0 28px; }
+
+/* ---- masthead ---- */
+.gc-mast {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 26px 0 18px;
+}
+.gc-wordmark {
+  font-weight: 800; font-size: 1.18rem; letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+.gc-wordmark .spark { color: var(--amp); }
+.gc-tagline {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.74rem;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint);
+}
+
+/* ---- HERO "today" band ---- */
+.gc-hero {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255,176,46,0.05), rgba(255,176,46,0) 40%),
+    var(--panel);
+  padding: 22px 26px;
+  margin-bottom: 26px;
+}
+/* running-track lane lines — the one decorative signature, kept faint */
+.gc-hero::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: repeating-linear-gradient(
+    180deg, transparent 0 26px, var(--line) 26px 27px);
+  opacity: 0.35;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 55%);
+          mask-image: linear-gradient(90deg, transparent, #000 55%);
+}
+.gc-hero-grid {
+  position: relative; z-index: 1;
+  display: grid; grid-template-columns: 1.5fr 1fr 1.15fr;
+  gap: 30px; align-items: stretch;
+}
+.gc-hero-col { min-width: 0; }
+.gc-hero-side {
+  padding-left: 26px; border-left: 1px solid var(--line);
+}
+.gc-hero-lab {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+  margin-bottom: 14px;
+}
+.gc-hero-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px 18px;
+}
+.gc-hero-stat { display: flex; flex-direction: column; gap: 3px; }
+.gc-hero-k {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+}
+.gc-hero-v {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.35rem;
+  line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.gc-hero-u { font-size: 0.62em; color: var(--muted); margin-left: 3px; font-weight: 500; }
+.gc-hero-next-desc {
+  font-size: 0.9rem; line-height: 1.5; color: var(--muted); margin-top: 10px;
+}
+.gc-hero-next-target {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.88rem; font-weight: 600;
+  color: var(--amp); margin-top: 8px;
+}
+.gc-verdict-eyebrow {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--amp);
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.gc-verdict-eyebrow::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--amp); box-shadow: 0 0 10px var(--amp);
+}
+.gc-verdict-num {
+  font-family: 'Archivo', system-ui, sans-serif; font-weight: 800;
+  font-size: clamp(2.8rem, 7vw, 4rem); line-height: 0.92;
+  letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+.gc-verdict-word { font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; }
+.gc-verdict-read { color: var(--muted); font-size: 0.95rem; line-height: 1.55; max-width: 46ch; margin-top: 14px; }
+.gc-verdict-read b { color: var(--text); font-weight: 600; }
+
+/* ---- section eyebrow + lane rule ---- */
+.gc-section {
+  display: flex; align-items: center; gap: 14px;
+  margin: 30px 0 14px;
+}
+.gc-section .lab {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap;
+}
+.gc-section .idx { color: var(--amp); }
+.gc-section .rule { flex: 1; height: 1px; background: var(--line); }
+
+/* section eyebrow with a trailing control (e.g. stock-style range tabs) */
+.gc-section-row { display: flex; align-items: center; gap: 16px; margin: 30px 0 14px; }
+.gc-section-row .gc-section { flex: 1; margin: 0; }
+
+/* range tabs at the top of a collapsible panel body */
+.gc-panel-range { display: flex; justify-content: flex-end; margin: 2px 0 10px; }
+
+/* plain x range-slider: drop the mini-chart preview, keep just the track + handles */
+.rangeslider-rangeplot .scatterlayer,
+.rangeslider-rangeplot .barlayer { display: none; }
+
+/* ---- cards (override Mantine surface for cohesion) ---- */
+.gc-card, .mantine-Card-root.gc-card {
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  transition: border-color 0.15s ease;
+}
+.gc-card:hover { border-color: var(--line-2) !important; }
+
+/* KPI stat tiles */
+.gc-kpi .gc-kpi-label {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; font-weight: 600;
+  letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);
+}
+.gc-kpi .gc-kpi-val {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700;
+  font-size: 1.85rem; line-height: 1.05; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.gc-kpi .gc-kpi-sub { font-size: 0.78rem; color: var(--faint); }
+.gc-kpi { position: relative; }
+.gc-kpi::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 3px; border-radius: 3px; background: var(--accent, var(--line-2));
+}
+
+/* recommendation cards — left priority accent bar */
+.gc-rec { position: relative; padding-left: 20px !important; }
+.gc-rec::before {
+  content: ""; position: absolute; left: 0; top: 16px; bottom: 16px;
+  width: 3px; border-radius: 3px; background: var(--accent, var(--line-2));
+}
+.gc-rec .gc-rec-action {
+  font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 0.9rem;
+}
+
+/* recommendations accordion — concise headers, details on click */
+.gc-recs .mantine-Accordion-item {
+  position: relative; overflow: hidden;
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  margin-bottom: 10px;
+}
+.gc-recs .mantine-Accordion-item::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--accent, var(--line-2)); z-index: 2;
+}
+.gc-recs .mantine-Accordion-item[data-active] { border-color: var(--line-2) !important; }
+.gc-recs .mantine-Accordion-control { padding-left: 18px; }
+.gc-recs .mantine-Accordion-control:hover { background: var(--panel-2); }
+.gc-recs .mantine-Accordion-chevron { color: var(--muted); }
+.gc-recs .mantine-Accordion-content { padding-left: 18px; }
+.gc-recs .gc-rec-action {
+  font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+/* assessment / console panel — slightly inset surface */
+.gc-console {
+  background: var(--panel-2) !important; border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+}
+.gc-assessment { font-size: 0.98rem; line-height: 1.7; color: var(--text); max-width: 80ch; }
+
+/* flags — clean inset list, topic bolded then detail */
+.gc-flags {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 16px; margin-top: 16px;
+}
+.gc-flags .gc-flags-lab {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--amp);
+  margin-bottom: 10px;
+}
+.gc-flag {
+  display: flex; gap: 11px; align-items: baseline; padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+.gc-flag:first-of-type { border-top: none; }
+.gc-flag .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--amp);
+  flex: none; transform: translateY(-1px);
+  box-shadow: 0 0 8px rgba(255,176,46,0.5);
+}
+.gc-flag .txt { font-size: 0.92rem; line-height: 1.55; color: var(--muted); }
+.gc-flag .txt b { color: var(--text); font-weight: 700; }
+
+/* run summary readout strip (Deep Analysis header) */
+.gc-runhead {
+  display: flex; flex-wrap: wrap; gap: 0;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  overflow: hidden;
+}
+.gc-runhead .cell {
+  padding: 12px 20px; border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 3px; min-width: 96px;
+}
+.gc-runhead .cell:last-child { border-right: none; }
+.gc-runhead .k {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; font-weight: 600;
+  letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);
+}
+.gc-runhead .v {
+  font-family: 'JetBrains Mono', monospace; font-size: 1.15rem; font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* ---- nav (segmented control restyle) + sync toolbar ---- */
+.gc-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; margin-bottom: 22px;
+}
+.gc-sync-cluster { display: flex; align-items: center; gap: 12px; }
+.gc-sync-status {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.74rem;
+  letter-spacing: 0.02em; color: var(--muted); white-space: nowrap;
+}
+.gc-sync-status .ok { color: #46D08A; }
+.gc-sync-status .err { color: #FF6B6B; }
+.gc-nav .mantine-SegmentedControl-root {
+  background: transparent; gap: 4px; padding: 0;
+}
+.gc-nav .mantine-SegmentedControl-indicator { display: none; }
+.gc-nav .mantine-SegmentedControl-label {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); padding: 8px 4px; margin-right: 22px;
+  border-bottom: 2px solid transparent;
+}
+.gc-nav .mantine-SegmentedControl-label[data-active] {
+  color: var(--text); border-bottom-color: var(--amp);
+}
+.gc-nav .mantine-SegmentedControl-control { background: transparent !important; }
+.gc-nav .mantine-SegmentedControl-control + .mantine-SegmentedControl-control::before { display: none; }
+
+/* ---- recommendations ticker (Overview → Coach) — broadcast running bar ---- */
+.gc-ticker {
+  display: flex; align-items: stretch; height: 44px; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.gc-ticker:hover { border-color: var(--amp); box-shadow: 0 0 0 1px var(--amp); }
+/* the "LIVE" lower-third label tab — solid amber, angled trailing edge */
+.gc-ticker-label {
+  display: flex; align-items: center; gap: 9px; flex: none;
+  padding: 0 26px 0 18px; background: var(--amp); color: var(--ink);
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 800;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 11px) 100%, 0 100%);
+}
+.gc-ticker-label .live {
+  width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ink);
+  animation: gc-ticker-pulse 1.2s ease-in-out infinite;
+}
+.gc-ticker-label .arr { font-size: 1rem; line-height: 1; }
+@keyframes gc-ticker-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+.gc-ticker-track {
+  position: relative; flex: 1; overflow: hidden; display: flex; align-items: center;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 2%, #000 97%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 2%, #000 97%, transparent);
+}
+.gc-ticker-move {
+  display: flex; white-space: nowrap;
+  animation: gc-ticker var(--gc-ticker-dur, 30s) linear infinite;
+}
+.gc-ticker:hover .gc-ticker-move { animation-play-state: paused; }
+.gc-ticker-group { display: inline-flex; align-items: center; }
+@keyframes gc-ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.gc-ticker-item {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 0.86rem; color: var(--text);
+}
+/* diamond separator after every item → perfectly periodic, seamless at the loop */
+.gc-ticker-item::after {
+  content: "◆"; color: var(--line-2); font-size: 0.46rem; margin: 0 28px;
+  position: relative; top: -1px;
+}
+.gc-ticker-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); }
+.gc-ticker-dot.high { background: #FF6B6B; }
+.gc-ticker-dot.medium { background: #FFB02E; }
+.gc-ticker-dot.low { background: var(--faint); }
+.gc-ticker-ttl { font-weight: 600; }
+
+/* ---- plan week board ---- */
+.plan-hint {
+  font-size: 0.82rem; color: var(--faint); margin: -4px 0 10px;
+}
+.plan-save-status {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; color: #46D08A;
+}
+.plan-board-week { margin-bottom: 18px; }
+.plan-week-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+}
+.plan-board-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;
+}
+.plan-daycol {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; min-height: 96px;
+  display: flex; flex-direction: column;
+}
+.plan-daycol.editable { border-style: dashed; border-color: var(--line-2); }
+.plan-daycol.drop-hover {
+  border-color: var(--amp) !important; border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--amp); background: rgba(255,176,46,0.04);
+}
+.plan-daycol-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 7px 10px; border-bottom: 1px solid var(--line);
+  font-family: 'JetBrains Mono', monospace;
+}
+.plan-daycol-head .dow {
+  font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.plan-daycol-head .dom { font-size: 0.8rem; font-weight: 700; color: var(--text); }
+.plan-daycol-head.today { background: rgba(255,176,46,0.10); }
+.plan-daycol-head.today .dow, .plan-daycol-head.today .dom { color: var(--amp); }
+.plan-daycol-head.past { opacity: 0.55; }
+.plan-daycol-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.plan-empty { color: var(--line-2); font-size: 0.9rem; text-align: center; padding: 6px 0; }
+
+.plan-card {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--line-2); border-radius: 7px;
+  padding: 7px 9px; display: flex; flex-direction: column; gap: 5px;
+}
+.plan-card[draggable="true"] { cursor: grab; }
+.plan-card[draggable="true"]:hover { border-color: var(--line-2); background: #20272f; }
+.plan-card.dragging { opacity: 0.4; }
+.plan-card.s-done    { border-left-color: #46D08A; }
+.plan-card.s-today   { border-left-color: var(--amp); }
+.plan-card.s-missed  { border-left-color: #FF6B6B; }
+.plan-card.s-upcoming{ border-left-color: var(--line-2); }
+.plan-card.s-rest    { border-left-color: var(--faint); opacity: 0.72; }
+.plan-card.s-skipped { border-left-color: var(--faint); opacity: 0.55; }
+.plan-card.s-skipped .plan-card-desc { text-decoration: line-through; }
+.plan-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.plan-stat-ic { font-size: 0.85rem; font-weight: 700; line-height: 1; }
+.plan-stat-ic.s-done { color: #46D08A; }
+.plan-stat-ic.s-today { color: var(--amp); }
+.plan-stat-ic.s-missed { color: #FF6B6B; }
+.plan-card-desc { font-size: 0.78rem; line-height: 1.35; color: var(--text); }
+.plan-card-target {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--muted);
+}
+.plan-card-actual {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+  color: #46D08A;
+}
+.plan-card-note { font-size: 0.68rem; color: var(--faint); font-style: italic; }
+.plan-card-acts { display: flex; gap: 6px; margin-top: 2px; }
+.plan-actbtn {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.64rem; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--line-2); border-radius: 5px;
+  padding: 2px 8px; cursor: pointer; transition: all 0.12s ease;
+}
+.plan-actbtn:hover { color: var(--text); border-color: var(--faint); }
+.plan-actbtn.active {
+  background: var(--amp); color: #1a1206; border-color: var(--amp);
+}
+
+@media (max-width: 860px) {
+  .plan-board-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 540px) {
+  .plan-board-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---- tables ---- */
+table.mantine-Table-table { font-size: 0.9rem; }
+.mantine-Table-th {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 0.72rem !important; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted) !important; font-weight: 600 !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+.mantine-Table-td { border-color: var(--line) !important; }
+.mantine-Table-tr[data-striped] td, tbody tr:nth-of-type(even) td { background: var(--panel-2); }
+/* numeric-looking cells get mono */
+.mantine-Table-td { font-variant-numeric: tabular-nums; }
+
+/* ---- buttons / inputs accent ---- */
+.mantine-Button-root[data-variant="filled"] {
+  background: var(--amp); color: #1a1206; font-weight: 700;
+}
+*:focus-visible { outline: 2px solid var(--amp) !important; outline-offset: 2px; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: var(--ink); }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 6px; border: 3px solid var(--ink); }
+::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+
+/* hide the plotly modebar leftovers cleanly */
+.js-plotly-plot .plotly .modebar { display: none !important; }
+
+@media (max-width: 860px) {
+  .gc-hero-grid { grid-template-columns: 1fr 1fr; }
+  .gc-hero-side:nth-child(2) { padding-left: 0; border-left: none; }
+}
+@media (max-width: 720px) {
+  .gc-shell { padding: 0 16px; }
+  .gc-hero-grid { grid-template-columns: 1fr; gap: 20px; }
+  .gc-hero-side { padding-left: 0; border-left: none;
+    border-top: 1px solid var(--line); padding-top: 18px; }
+  .gc-hero::after { -webkit-mask-image: none; mask-image: none; opacity: 0.18; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

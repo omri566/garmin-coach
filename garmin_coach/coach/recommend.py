@@ -19,6 +19,7 @@ import logging
 from garmin_coach import config
 from garmin_coach.coach import context
 from garmin_coach.coach import plan as plan_mod
+from garmin_coach.coach import schedule
 from garmin_coach.knowledge import kb
 from garmin_coach.llm import get_provider
 
@@ -48,10 +49,10 @@ def _plan_context() -> tuple[str, str | None]:
              f"Goal: {plan.get('goal')} (target {plan.get('goal_date') or '—'})"]
     for ph in plan.get("macro", [])[:6]:
         lines.append(f"- {ph.get('weeks')}: {ph.get('phase')} — {ph.get('focus','')}")
-    for wk in plan.get("next_month", []):
-        sess = "; ".join(f"{s.get('day')} {s.get('type')} ({s.get('target','')})"
-                         for s in wk.get("sessions", []))
-        lines.append(f"  {wk.get('week')}: {sess}")
+    # Date-anchored execution state for the close weeks: which sessions are
+    # already DONE (incl. ones run on a different day) vs still pending. This is
+    # what stops the coach double-counting a completed session as an extra run.
+    lines.append("\n" + schedule.execution_summary_text(plan))
     return "\n".join(lines), plan.get("goal")
 
 REC_SCHEMA = {

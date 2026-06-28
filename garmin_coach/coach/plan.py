@@ -110,6 +110,42 @@ def load_latest() -> dict | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def save_latest(plan: dict) -> None:
+    """Persist edits to the active plan in place (no new timestamped snapshot).
+
+    Used by the dashboard for athlete tweaks — rescheduling a session (drag) or
+    marking it done/skipped — so the generated plan history stays intact.
+    """
+    PLAN_DIR.mkdir(parents=True, exist_ok=True)
+    (PLAN_DIR / "latest.json").write_text(json.dumps(plan, indent=2))
+
+
+def set_override(key: str, patch: dict | None) -> dict | None:
+    """Merge an override for session `key` ("<week>:<session>") and persist.
+
+    `patch` keys: 'date' (ISO, from drag-reschedule) and/or 'status'
+    ('done'/'skipped', manual). A falsy field clears that field; an empty patch
+    clears the whole override.
+    """
+    plan = load_latest()
+    if plan is None:
+        return None
+    overrides = plan.setdefault("overrides", {})
+    cur = dict(overrides.get(key, {}))
+    for field in ("date", "status"):
+        if patch and field in patch:
+            if patch[field]:
+                cur[field] = patch[field]
+            else:
+                cur.pop(field, None)
+    if cur:
+        overrides[key] = cur
+    else:
+        overrides.pop(key, None)
+    save_latest(plan)
+    return plan
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     p = argparse.ArgumentParser(description="Generate a goal-driven training plan.")

@@ -9,6 +9,8 @@ import datetime as dt
 import json
 from functools import lru_cache
 
+import pandas as pd
+
 from garmin_coach import profile as prof
 from garmin_coach.analytics import load, trends
 from garmin_coach.store import db
@@ -21,6 +23,27 @@ def profile():
 
 def default_start(months: int = 18) -> str:
     return (dt.date.today() - dt.timedelta(days=months * 30)).isoformat()
+
+
+RANGE_DAYS = {"3m": 90, "1y": 365, "5y": 365 * 5}
+
+
+def range_start(rng: str = "1y") -> str:
+    """ISO start date for a 3m/1y/5y range key."""
+    days = RANGE_DAYS.get(rng, 365)
+    return (dt.date.today() - dt.timedelta(days=days)).isoformat()
+
+
+def slice_since(df, rng: str = "1y", col: str = "date"):
+    """Trim a date-indexed/columned trend frame to the chosen range window."""
+    if df is None or df.empty:
+        return df
+    start = pd.to_datetime(range_start(rng))
+    if col in df.columns:
+        return df[df[col] >= start]
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df[df.index >= start]
+    return df
 
 
 def load_series(start: str | None = None):
@@ -43,12 +66,36 @@ def vo2max_trend():
     return trends.vo2max_trend()
 
 
+def aerobic_pace_trend():
+    return trends.aerobic_pace_trend()
+
+
+def technique_trends():
+    return trends.technique_trends()
+
+
 def zone_distribution(weeks: int = 12):
     return trends.zone_distribution(weeks)
 
 
 def health_trend():
     return trends.health_trend()
+
+
+def power_trend():
+    return trends.power_trend()
+
+
+def zone_time_weekly():
+    return trends.zone_time_weekly()
+
+
+def elevation_weekly():
+    return trends.elevation_weekly()
+
+
+def recovery_trend():
+    return trends.recovery_trend()
 
 
 def latest_health() -> dict:

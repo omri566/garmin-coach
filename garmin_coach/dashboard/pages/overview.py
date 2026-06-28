@@ -1,19 +1,180 @@
 """Overview tab — headline fitness/fatigue/form, last run, key trends."""
 from __future__ import annotations
 
-import dash_mantine_components as dmc
+import datetime as dt
+import re
 
+import dash_mantine_components as dmc
+from dash import Input, Output, callback, html
+
+from garmin_coach.coach import plan as plan_mod
+from garmin_coach.coach import recommend as rec_mod
+from garmin_coach.coach import schedule
 from garmin_coach.dashboard import data, figures
 from garmin_coach.dashboard.ui import (
-    CARD, acwr_color, fmt_pace, kpi, panel, tsb_color, with_info,
+    CARD, acwr_color, fig_id, fmt_pace, kpi, panel, range_tabs, section,
+    section_with_control, tsb_color, with_info,
 )
+
+_TYPE_COLOR = {"easy": "teal", "long": "blue", "tempo": "orange",
+               "threshold": "orange", "intervals": "red", "workout": "red",
+               "race": "grape", "rest": "gray", "cross": "gray"}
+
+
+def next_session():
+    """The next workout still to do — skips rest and already-done/skipped sessions."""
+    plan = plan_mod.load_latest()
+    if not plan:
+        return None
+    sched = schedule.build_schedule(plan)
+    today = sched["today"]
+    best = None
+    for wk in sched["weeks"]:
+        for s in wk["sessions"]:
+            if (s["type"] or "").lower() == "rest" or s["status"] in ("done", "skipped"):
+                continue
+            if s["date"] < today:        # don't surface a missed past session here
+                continue
+            if best is None or s["date"] < best["date"]:
+                best = s
+    if not best:
+        return None
+    when = "Today" if best["date"] == today else f"{best['date']:%a}"
+    return {"type": best["type"], "description": best["description"],
+            "target": best["target"], "when": when}
+
+
+def _verdict(tsb, acwr, readiness):
+    """Plain-language read of today's state, driven by Form (TSB)."""
+    if tsb is None:
+        return "—", figures.MUTED, "Not enough recent training to read your form."
+    if tsb > 8:
+        word, color = "Fresh", figures.GREEN
+        read = "You're rested and peaked — a good window to race or hit a hard key session."
+    elif tsb > -5:
+        word, color = "Balanced", figures.BLUE
+        read = "Form and fatigue are in balance. Hold the rhythm; train as planned."
+    elif tsb > -15:
+        word, color = "Building", figures.ORANGE
+        read = "You're carrying productive fatigue from recent load. Keep easy days easy."
+    else:
+        word, color = "Fatigued", figures.RED
+        read = "Heavy fatigue load. Back off and prioritise recovery before the next hard effort."
+    if acwr is not None and acwr > 1.5:
+        read += " Load is ramping fast — watch injury risk."
+    elif readiness is not None and readiness < 40:
+        read += " Recovery markers are low this morning."
+    return word, color, read
+
+
+def hero():
+    st = data.current_state()
+    h = data.latest_health()
+    tsb = st.get("tsb")
+    acwr = st.get("acwr")
+
+    def hv(key):
+        v = h.get(key)
+        return v["value"] if v else None
+
+    rdy, hrv = hv("readiness_score"), hv("hrv_overnight")
+    rhr, sleep = hv("resting_hr"), hv("sleep_score")
+    word, color, read = _verdict(tsb, acwr, rdy)
+
+    # Zone 1 — today's form verdict.
+    verdict = html.Div([
+        html.Div("Today · Form", className="gc-verdict-eyebrow"),
+        html.Div(f"{tsb:+.0f}" if tsb is not None else "—",
+                 className="gc-verdict-num", style={"color": color}),
+        html.Div(word, className="gc-verdict-word", style={"color": color}),
+        html.Div(read, className="gc-verdict-read"),
+    ], className="gc-hero-col")
+
+    # Zone 2 — morning recovery markers (distinct from the metrics row below).
+    def stat(label, val, unit="", c=figures.TEXT):
+        shown = f"{val:.0f}" if isinstance(val, (int, float)) else "—"
+        return html.Div([
+            html.Div(label, className="gc-hero-k"),
+            html.Div([shown, html.Span(unit, className="gc-hero-u")
+                      if (unit and val is not None) else ""],
+                     className="gc-hero-v", style={"color": c}),
+        ], className="gc-hero-stat")
+
+    recovery = html.Div([
+        html.Div("Recovery", className="gc-hero-lab"),
+        html.Div([
+            stat("Readiness", rdy, "", figures.TEAL),
+            stat("Sleep", sleep, "", figures.GREEN),
+            stat("HRV", hrv, " ms"),
+            stat("Resting HR", rhr, " bpm"),
+        ], className="gc-hero-stats"),
+    ], className="gc-hero-col gc-hero-side")
+
+    # Zone 3 — next planned workout.
+    ns = next_session()
+    if ns:
+        tgt = ns.get("target")
+        next_body = [
+            dmc.Group([
+                dmc.Text(ns["when"], className="gc-readout", fw=700, size="sm"),
+                dmc.Badge(ns["type"], variant="light", size="sm",
+                          color=_TYPE_COLOR.get((ns["type"] or "").lower(), "gray")),
+            ], gap="sm", align="center"),
+            html.Div(ns.get("description", ""), className="gc-hero-next-desc"),
+            html.Div(tgt, className="gc-hero-next-target")
+            if tgt and tgt != "—" else None,
+        ]
+    else:
+        next_body = [html.Div("No plan yet — set a goal in the Coach tab to get a "
+                              "scheduled workout here.", className="gc-hero-next-desc")]
+    nxt = html.Div([
+        html.Div("Next session", className="gc-hero-lab"),
+        *next_body,
+    ], className="gc-hero-col gc-hero-side")
+
+    return html.Div(html.Div([verdict, recovery, nxt], className="gc-hero-grid"),
+                    className="gc-hero")
+
+
+def recs_ticker():
+    """A news-style scrolling bar of the coach's prioritised actions; click to
+    open the Coach tab for the full write-up."""
+    rec = rec_mod.load_latest()
+    recs = (rec or {}).get("recommendations", [])
+    if recs:
+        items = [html.Span([
+            html.Span(className=f"gc-ticker-dot {r.get('priority', 'low')}"),
+            html.Span(r.get("title", ""), className="gc-ticker-ttl"),
+        ], className="gc-ticker-item") for r in recs]
+        # Scale the scroll duration to the content so the speed stays constant
+        # (~70px/s, a readable broadcast crawl) no matter how many actions there are.
+        approx_px = sum(len(r.get("title", "")) for r in recs) * 9 + len(recs) * 130
+        dur = max(14, round(approx_px / 110))
+    else:
+        items = [html.Span("No recommendations yet — open Coach to generate guidance.",
+                           className="gc-ticker-item")]
+        dur = 24
+    # Two identical groups side by side + a -50% slide = seamless loop.
+    move = html.Div([html.Div(items, className="gc-ticker-group"),
+                     html.Div(items, className="gc-ticker-group")],
+                    className="gc-ticker-move", style={"--gc-ticker-dur": f"{dur}s"})
+    return html.Div([
+        html.Div([html.Span(className="live"), "Coach",
+                  html.Span("›", className="arr")], className="gc-ticker-label"),
+        html.Div(move, className="gc-ticker-track"),
+    ], id="ticker-goto-coach", className="gc-ticker", n_clicks=0,
+        title="Open the Coach tab for full recommendations")
+
+
+@callback(Output("tab-switch", "value"), Input("ticker-goto-coach", "n_clicks"),
+          prevent_initial_call=True)
+def _ticker_to_coach(_n):
+    return "coach"
 
 
 def kpi_row():
     st = data.current_state()
-    h = data.latest_health()
     vo2 = data.latest_vo2max()
-    hrv, rhr, rdy = h.get("hrv_overnight"), h.get("resting_hr"), h.get("readiness_score")
     cards = [
         kpi("Fitness · CTL", f"{st.get('ctl','—')}", "chronic load (42d)", figures.BLUE, "ctl"),
         kpi("Fatigue · ATL", f"{st.get('atl','—')}", "acute load (7d)", figures.ORANGE, "atl"),
@@ -22,11 +183,8 @@ def kpi_row():
         kpi("ACWR", f"{st.get('acwr','—')}", "sweet spot 0.8–1.3",
             acwr_color(st.get("acwr")), "acwr"),
         kpi("VO₂max", f"{vo2 or '—'}", "ml/kg/min", figures.VIOLET, "vo2max"),
-        kpi("Readiness", f"{int(rdy['value']) if rdy else '—'}",
-            f"HRV {int(hrv['value']) if hrv else '—'} · RHR {int(rhr['value']) if rhr else '—'}",
-            figures.TEAL, "readiness"),
     ]
-    return dmc.SimpleGrid(cards, cols={"base": 2, "sm": 3, "lg": 6}, spacing="md")
+    return dmc.SimpleGrid(cards, cols={"base": 2, "sm": 3, "lg": 5}, spacing="md")
 
 
 def last_run_card():
@@ -72,23 +230,190 @@ def last_run_card():
     ], **CARD)
 
 
+# --- last run vs plan -------------------------------------------------------
+_CHIP_COLOR = {"ok": "green", "warn": "orange", "soft": "blue"}
+
+
+def _parse_target(text):
+    """Pull distance / pace-range / HR-cap out of a planned session's target."""
+    out = {}
+    if not text:
+        return out
+    m = re.search(r"(\d+(?:\.\d+)?)\s*km", text)
+    if m:
+        out["dist_km"] = float(m.group(1))
+    m = re.search(r"(\d):(\d\d)\s*[–—-]\s*(\d):(\d\d)", text)
+    if m:
+        out["pace_lo"] = int(m.group(1)) * 60 + int(m.group(2))
+        out["pace_hi"] = int(m.group(3)) * 60 + int(m.group(4))
+    else:
+        m = re.search(r"(\d):(\d\d)\s*/?\s*km", text)
+        if m:
+            v = int(m.group(1)) * 60 + int(m.group(2))
+            out["pace_lo"], out["pace_hi"] = v - 10, v + 10
+    m = re.search(r"HR\s*<\s*(\d+)", text)
+    if m:
+        out["hr_cap"] = int(m.group(1))
+    return out
+
+
+def _matched_session(r):
+    """The planned session this run fulfilled, via the schedule auto-match."""
+    plan = plan_mod.load_latest()
+    if not plan or not r:
+        return None
+    for wk in schedule.build_schedule(plan)["weeks"]:
+        for s in wk["sessions"]:
+            m = s.get("match")
+            if m and m.get("activity_id") == r.get("activity_id"):
+                return s
+    return None
+
+
+def _run_verdict(r, session):
+    """(headline, badge_tone, [(label, detail, chip_kind)…]) comparing run↔plan."""
+    pace, hr = r.get("avg_pace_s_km"), r.get("avg_hr")
+    dist = (r.get("distance_m") or 0) / 1000
+    decoup = r.get("decoupling_pct")
+    checks, too_hard, too_easy = [], False, False
+
+    if session:
+        t = _parse_target(f"{session.get('target','')} {session.get('description','')}")
+        if pace and "pace_lo" in t:
+            if pace < t["pace_lo"] - 8:
+                checks.append(("Pace", f"{fmt_pace(pace)} — faster than prescribed", "warn"))
+                too_hard = True
+            elif pace > t["pace_hi"] + 12:
+                checks.append(("Pace", f"{fmt_pace(pace)} — slower than prescribed", "soft"))
+                too_easy = True
+            else:
+                checks.append(("Pace", f"{fmt_pace(pace)} — in target range", "ok"))
+        if hr and "hr_cap" in t:
+            if hr <= t["hr_cap"] + 2:
+                checks.append(("Heart rate", f"{hr:.0f} — within Z2 cap (<{t['hr_cap']})", "ok"))
+            else:
+                checks.append(("Heart rate", f"{hr:.0f} — above cap (<{t['hr_cap']})", "warn"))
+                too_hard = True
+        if "dist_km" in t and dist:
+            tol = max(0.5, 0.12 * t["dist_km"])
+            tag = (f"{dist:.1f}/{t['dist_km']:.0f} km")
+            if abs(dist - t["dist_km"]) <= tol:
+                checks.append(("Distance", f"{tag} — on target", "ok"))
+            else:
+                checks.append(("Distance", f"{tag} — {'longer' if dist > t['dist_km'] else 'short'}", "soft"))
+        if too_hard:
+            head, tone = "Ran harder than prescribed", "orange"
+        elif too_easy and not any(c[2] == "ok" for c in checks):
+            head, tone = "Easier than planned", "blue"
+        elif any(c[2] == "ok" for c in checks):
+            head, tone = "On plan", "green"
+        else:
+            head, tone = "Logged", "gray"
+    else:
+        head, tone = "Extra session — not in plan", "grape"
+
+    if decoup is not None:
+        if decoup <= 5:
+            checks.append(("Durability", f"{decoup:.1f}% decoupling — held pace", "ok"))
+        else:
+            checks.append(("Durability", f"{decoup:.1f}% decoupling — faded late", "warn"))
+    return head, tone, checks
+
+
+def last_run_section():
+    r = data.last_run()
+    if not r:
+        return dmc.Card(dmc.Text("No runs yet."), **CARD)
+    session = _matched_session(r)
+    head, tone, checks = _run_verdict(r, session)
+
+    if session:
+        planned = dmc.Group([
+            dmc.Badge(session["type"], variant="light", size="sm"),
+            dmc.Text(session.get("target") or session.get("description", ""),
+                     size="sm", c="dimmed"),
+        ], gap="xs")
+        if session.get("note"):
+            planned = dmc.Stack([planned, dmc.Text(session["note"], size="xs",
+                                                   c="dimmed", fs="italic")], gap=4)
+    else:
+        planned = dmc.Text("No matching planned session — counts as an extra run.",
+                           size="sm", c="dimmed")
+
+    verdict = dmc.Card([
+        dmc.Group([dmc.Text("Versus plan", fw=600, size="sm"),
+                   dmc.Badge(head, color=tone, variant="filled", size="sm")],
+                  justify="space-between"),
+        dmc.Text("Planned", size="xs", c="dimmed", tt="uppercase", fw=600, mt=8),
+        planned,
+        dmc.Divider(my="sm"),
+        dmc.Stack([dmc.Group([
+            dmc.Text(label, size="sm", c="dimmed"),
+            dmc.Badge(detail, color=_CHIP_COLOR.get(kind, "gray"),
+                      variant="light", size="sm"),
+        ], justify="space-between", wrap="nowrap") for label, detail, kind in checks],
+            gap=8),
+    ], **CARD)
+
+    return dmc.Grid([
+        dmc.GridCol(last_run_card(), span={"base": 12, "md": 5}),
+        dmc.GridCol(verdict, span={"base": 12, "md": 7}),
+    ], gutter="md")
+
+
+# --- load & fatigue with a stock-style range selector -----------------------
+_RANGE_DAYS = {"3m": 90, "1y": 365, "5y": 365 * 5}
+
+
+def load_fatigue_series(rng: str = "1y"):
+    """Daily fitness/fatigue/form/ACWR for the chosen window, averaged to weekly
+    points so the lines read as smooth trends rather than day-to-day noise."""
+    days = _RANGE_DAYS.get(rng, 365)
+    start = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    df = data.load_series(start=start)
+    if df.empty:
+        return df
+    return df.resample("W").mean(numeric_only=True)
+
+
+@callback(Output(fig_id("ov-ff"), "figure"), Output(fig_id("ov-acwr"), "figure"),
+          Input("ov-range", "value"))
+def _update_load_fatigue(rng):
+    ldf = load_fatigue_series(rng)
+    return figures.fitness_form(ldf), figures.acwr(ldf)
+
+
+def recovery_fig(rng="1y"):
+    """Overnight HRV — the headline recovery signal — over the chosen window,
+    with a last-14-day average baseline."""
+    rec = data.slice_since(data.recovery_trend(), rng, col="day")
+    return figures.daily_metric(rec, "hrv_overnight", "HRV", figures.VIOLET,
+                                height=300, recent_avg=True)
+
+
+@callback(Output(fig_id("ov-recovery"), "figure"), Input("ov-rec-range", "value"))
+def _update_recovery(rng):
+    return recovery_fig(rng)
+
+
 def layout():
-    ldf = data.load_series()
+    ldf = load_fatigue_series("1y")
     return dmc.Stack([
+        hero(),
+        recs_ticker(),
+        section("Key metrics"),
         kpi_row(),
-        panel("Fitness · Fatigue · Form", figures.fitness_form(ldf), "chart_fitness_form"),
+        section("Last run"),
+        last_run_section(),
+        section_with_control("Load & fatigue", range_tabs("ov-range")),
         dmc.Grid([
-            dmc.GridCol(panel("Training-load ratio (ACWR)", figures.acwr(ldf), "chart_acwr"), span={"base": 12, "md": 8}),
-            dmc.GridCol(last_run_card(), span={"base": 12, "md": 4}),
+            dmc.GridCol(panel("Fitness · Fatigue · Form", figures.fitness_form(ldf),
+                              "chart_fitness_form", key="ov-ff"),
+                        span={"base": 12, "md": 8}),
+            dmc.GridCol(panel("Training-load ratio (ACWR)", figures.acwr(ldf),
+                              "chart_acwr", key="ov-acwr"),
+                        span={"base": 12, "md": 4}),
         ], gutter="md"),
-        dmc.Grid([
-            dmc.GridCol(panel("Weekly volume", figures.weekly_volume(data.weekly_volume()), "chart_volume"), span={"base": 12, "md": 8}),
-            dmc.GridCol(panel("HR-zone mix (12 wk)", figures.zone_donut(data.zone_distribution()), "chart_zones"), span={"base": 12, "md": 4}),
-        ], gutter="md"),
-        dmc.Grid([
-            dmc.GridCol(panel("Aerobic efficiency (EF)", figures.line_trend(
-                data.efficiency_trend(), "ef", "EF", figures.GREEN), "chart_ef"), span={"base": 12, "md": 6}),
-            dmc.GridCol(panel("VO₂max", figures.line_trend(
-                data.vo2max_trend(), "vo2max", "VO₂max", figures.VIOLET), "chart_vo2"), span={"base": 12, "md": 6}),
-        ], gutter="md"),
+        section_with_control("Recovery", range_tabs("ov-rec-range")),
+        panel("HRV (overnight)", recovery_fig("1y"), key="ov-recovery"),
     ], gap="md")
