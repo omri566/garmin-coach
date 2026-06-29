@@ -468,6 +468,77 @@ table.mantine-Table-table { font-size: 0.9rem; }
   .gc-hero::after { -webkit-mask-image: none; mask-image: none; opacity: 0.18; }
 }
 
+/* ---- Coach: motivating plan progress (warm) ---- */
+.gc-plan-hero {
+  display: flex; justify-content: space-between; align-items: center; gap: 24px;
+  flex-wrap: wrap;
+  background: linear-gradient(135deg, rgba(255,176,46,0.10), rgba(255,176,46,0.015));
+  border: 1px solid var(--line); border-left: 3px solid var(--amp);
+  border-radius: 14px; padding: 20px 24px;
+}
+.gc-hero-left { min-width: 240px; }
+.gc-hero-eyebrow {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--amp);
+}
+.gc-hero-goal {
+  font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 1.55rem;
+  color: var(--text); margin: 4px 0; line-height: 1.12;
+}
+.gc-hero-enc { color: var(--muted); font-size: 0.95rem; }
+.gc-hero-chips { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.gc-hero-chip {
+  font-size: 0.8rem; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+}
+.gc-hero-chip.hot { color: var(--amp); border-color: rgba(255,176,46,0.4); }
+.gc-hero-chip.good { color: #46D08A; }
+.gc-hero-rings { display: flex; gap: 22px; }
+.gc-ring { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.gc-ring-cap {
+  font-size: 0.68rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.gc-today {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 8px;
+}
+.gc-today.is-today {
+  border-color: rgba(255,176,46,0.5);
+  box-shadow: inset 0 0 0 1px rgba(255,176,46,0.12);
+}
+.gc-today-head { display: flex; align-items: center; gap: 12px; }
+.gc-today-when {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.76rem;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--amp);
+  font-weight: 600;
+}
+.gc-today.done .gc-today-when { color: var(--muted); }
+.gc-today-desc {
+  font-family: 'Archivo', sans-serif; font-size: 1.2rem; font-weight: 600;
+  color: var(--text);
+}
+.gc-today-target { color: var(--muted); font-size: 0.9rem; }
+.gc-today-cta { align-self: flex-start; margin-top: 6px; }
+
+.gc-miles { display: flex; gap: 12px; flex-wrap: wrap; }
+.gc-mile {
+  flex: 1 1 150px; display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px;
+}
+.gc-mile .ic { font-size: 1.4rem; line-height: 1; }
+.gc-mile .val {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text);
+  font-size: 1.05rem;
+}
+.gc-mile .lab {
+  font-size: 0.68rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.plan-save-row { min-height: 16px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }

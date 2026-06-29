@@ -98,6 +98,68 @@ def recovery_trend():
     return trends.recovery_trend()
 
 
+# --- motivation / progression metrics for the Coach tab ---------------------
+def _running_run_dates() -> list[dt.date]:
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT date(start_time) FROM activity_metrics "
+            "WHERE sport LIKE '%running%' AND start_time IS NOT NULL"
+        ).fetchall()
+    out = []
+    for (d,) in rows:
+        try:
+            out.append(dt.date.fromisoformat(d))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def running_streak_weeks(today: dt.date | None = None) -> int:
+    """Consecutive Sun–Sat weeks (up to now) with at least one run."""
+    from garmin_coach.coach.schedule import _week_start
+    today = today or dt.date.today()
+    weeks = {_week_start(d) for d in _running_run_dates()}
+    if not weeks:
+        return 0
+    cur = _week_start(today)
+    if cur not in weeks:            # this week not started yet → don't break streak
+        cur -= dt.timedelta(days=7)
+    n = 0
+    while cur in weeks:
+        n += 1
+        cur -= dt.timedelta(days=7)
+    return n
+
+
+def activity_highlights(today: dt.date | None = None) -> dict:
+    """Headline numbers for the milestones strip."""
+    today = today or dt.date.today()
+    month_start = today.replace(day=1).isoformat()
+    with db.connect() as conn:
+        longest = conn.execute(
+            "SELECT MAX(distance_m) FROM activity_metrics WHERE sport LIKE '%running%'"
+        ).fetchone()[0]
+        month_km = conn.execute(
+            "SELECT COALESCE(SUM(distance_m), 0) / 1000.0 FROM activity_metrics "
+            "WHERE sport LIKE '%running%' AND date(start_time) >= ?", (month_start,)
+        ).fetchone()[0]
+    return {"longest_km": (longest or 0) / 1000.0, "month_km": float(month_km or 0)}
+
+
+def fitness_progress(since_iso: str | None = None) -> dict | None:
+    """Current CTL (fitness) and its change since a plan-start date."""
+    df = load.load_series(start=default_start())
+    if df is None or df.empty:
+        return None
+    cur = float(df["ctl"].iloc[-1])
+    delta = None
+    if since_iso:
+        sub = df[df.index <= pd.to_datetime(str(since_iso)[:10])]
+        if not sub.empty:
+            delta = cur - float(sub["ctl"].iloc[-1])
+    return {"ctl": round(cur, 1), "delta": round(delta, 1) if delta is not None else None}
+
+
 def latest_health() -> dict:
     """Most recent non-null value for each recovery metric."""
     out = {}

@@ -6,21 +6,24 @@ loading spinner).
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html
+from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
 from garmin_coach.coach import recommend as rec_mod
 from garmin_coach.coach import schedule
-from garmin_coach.dashboard import figures
+from garmin_coach.dashboard import data, figures
 from garmin_coach.dashboard.ui import CARD, fmt_pace, section
 from garmin_coach.knowledge import kb
 
 PRIORITY_COLOR = {"high": "red", "medium": "orange", "low": "gray"}
 PRIORITY_HEX = {"high": figures.RED, "medium": figures.ORANGE, "low": figures.MUTED}
+PRIORITY_LABEL = {"high": "Do first", "medium": "Soon", "low": "When you can"}
+_DAYS_SUN_FIRST = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
 def _empty(msg):
@@ -68,8 +71,9 @@ def render_recs(rec):
     for i, r in enumerate(rec.get("recommendations", [])):
         accent = PRIORITY_HEX.get(r["priority"], figures.MUTED)
         control = dmc.AccordionControl(dmc.Group([
-            dmc.Badge(r["priority"], color=PRIORITY_COLOR.get(r["priority"], "gray"),
-                      variant="filled", size="sm", w=64),
+            dmc.Badge(PRIORITY_LABEL.get(r["priority"], r["priority"]),
+                      color=PRIORITY_COLOR.get(r["priority"], "gray"),
+                      variant="light", size="sm", w=92),
             dmc.Text(r["title"], fw=600, size="sm"),
             dmc.Badge(r["horizon"].replace("_", " "), variant="outline",
                       color="gray", size="xs"),
@@ -79,7 +83,7 @@ def render_recs(rec):
                      style={"color": accent}),
             dmc.Text(r["rationale"], size="sm", c="dimmed",
                      style={"lineHeight": 1.6}),
-            *([dmc.Text("Sources · " + "; ".join(r["citations"]), size="xs",
+            *([dmc.Text("Based on · " + "; ".join(r["citations"]), size="xs",
                         c="dimmed", fs="italic")] if r.get("citations") else []),
         ], gap=8))
         items.append(dmc.AccordionItem([control, panel], value=str(i),
@@ -90,23 +94,23 @@ def render_recs(rec):
     flags = rec.get("flags", [])
     head = [
         dmc.Group([
-            dmc.Text("Assessment", fw=700, size="md"),
-            dmc.Text(f"generated {rec.get('generated_at','')[:16]} · KB v{rec.get('kb_version','?')}",
+            dmc.Text("How you're doing", fw=700, size="md"),
+            dmc.Text(f"updated {rec.get('generated_at','')[:10]}",
                      size="xs", c="dimmed", className="mono"),
         ], justify="space-between"),
         dmc.Spoiler(
-            showLabel="Show full assessment", hideLabel="Show less", maxHeight=80,
+            showLabel="Read more", hideLabel="Show less", maxHeight=80,
             children=html.Div(rec.get("assessment", ""), className="gc-assessment"),
             mt=10),
     ]
     if flags:
         head.append(html.Div([
-            html.Div("Flags", className="gc-flags-lab"),
+            html.Div("Watch-outs", className="gc-flags-lab"),
             *[_flag_row(f) for f in flags],
         ], className="gc-flags"))
     return dmc.Stack([
         dmc.Card(head, className="gc-console", p="lg"),
-        section("Prioritised actions"),
+        section("Your focus right now"),
         actions,
     ], gap="md")
 
@@ -214,18 +218,151 @@ def _later_table(week):
     ], **CARD)
 
 
+def _countdown(goal_date, today):
+    if not goal_date:
+        return "No race date set"
+    try:
+        d = dt.date.fromisoformat(goal_date)
+    except (ValueError, TypeError):
+        return "No race date set"
+    days = (d - today).days
+    if days > 7:
+        wks = days // 7
+        return f"{wks} weeks to race day"
+    if days > 0:
+        return f"{days} day{'s' if days != 1 else ''} to race day"
+    if days == 0:
+        return "Race day is today 🏁"
+    return "Race day has passed"
+
+
+def _ring(pct, color, caption):
+    return html.Div([
+        dmc.RingProgress(size=92, thickness=9, roundCaps=True,
+                         sections=[{"value": max(0, min(100, pct)), "color": color}],
+                         label=dmc.Text(f"{pct}%", ta="center", fw=700, size="sm")),
+        html.Div(caption, className="gc-ring-cap"),
+    ], className="gc-ring")
+
+
+def _progress_hero(plan, sched, streak):
+    weeks, cur, today = sched["weeks"], sched["current_index"], sched["today"]
+    done = sum(w["done"] for w in weeks)
+    total = sum(w["total"] for w in weeks)
+    pct = round(100 * done / total) if total else 0
+    this = weeks[cur] if weeks else None
+    tdone, ttotal = (this["done"], this["total"]) if this else (0, 0)
+    if ttotal and tdone >= ttotal:
+        enc = "This week's done — great work! 🎉"
+    elif ttotal:
+        left = ttotal - tdone
+        enc = f"{left} session{'s' if left != 1 else ''} to go this week — you've got this."
+    else:
+        enc = "Let's get moving."
+    fit = data.fitness_progress(plan.get("generated_at"))
+
+    chips = []
+    if streak >= 2:
+        chips.append(html.Div(["🔥 ", html.B(f"{streak}"), f"-week streak"],
+                              className="gc-hero-chip hot"))
+    if fit and fit.get("delta") is not None and abs(fit["delta"]) >= 1:
+        up = fit["delta"] >= 0
+        chips.append(html.Div([("▲ " if up else "▼ "), "Fitness ",
+                               html.B(f"{'+' if up else ''}{fit['delta']:.0f}"),
+                               " since you started"],
+                              className="gc-hero-chip" + (" good" if up else "")))
+
+    left_col = html.Div([
+        html.Div(_countdown(plan.get("goal_date"), today), className="gc-hero-eyebrow"),
+        html.Div(plan.get("goal", "Your plan"), className="gc-hero-goal"),
+        html.Div(enc, className="gc-hero-enc"),
+        html.Div(chips, className="gc-hero-chips") if chips else None,
+    ], className="gc-hero-left")
+    rings = html.Div([
+        _ring(pct, "amp", "plan complete"),
+        _ring(round(100 * tdone / ttotal) if ttotal else 0, "teal", "this week"),
+    ], className="gc-hero-rings")
+    return html.Div([left_col, rings], className="gc-plan-hero")
+
+
+def _today_card(sched):
+    today = sched["today"]
+    todays, upcoming = [], []
+    for w in sched["weeks"]:
+        for s in w["sessions"]:
+            if (s["type"] or "").lower() == "rest" or s["status"] in ("done", "skipped"):
+                continue
+            if s["date"] == today:
+                todays.append(s)
+            elif s["date"] > today:
+                upcoming.append(s)
+    if todays:
+        s, when, is_today = todays[0], "Today", True
+    elif upcoming:
+        s = min(upcoming, key=lambda x: x["date"])
+        when, is_today = (f"{s['date']:%A}" if (s["date"] - today).days < 7
+                          else f"{s['date']:%a %b %-d}"), False
+    else:
+        return html.Div([
+            html.Div("Nice — nothing left to do", className="gc-today-when"),
+            html.Div("You're all caught up. Set a new goal when you're ready.",
+                     className="gc-today-desc"),
+        ], className="gc-today done")
+
+    typ = (s["type"] or "").lower()
+    body = [
+        html.Div([
+            html.Span("Today" if is_today else f"Next · {when}", className="gc-today-when"),
+            dmc.Badge(s["type"], color=TYPE_COLOR.get(typ, "gray"), variant="light",
+                      size="sm"),
+        ], className="gc-today-head"),
+        html.Div(s.get("description", ""), className="gc-today-desc"),
+    ]
+    if s.get("target"):
+        body.append(html.Div(s["target"], className="gc-today-target"))
+    body.append(dmc.Button(
+        "Mark today done" if is_today else "Mark done", size="sm",
+        id={"type": "plan-act", "key": s["key"], "act": "done-today"},
+        n_clicks=0, className="gc-today-cta"))
+    return html.Div(body, className="gc-today" + (" is-today" if is_today else ""))
+
+
+def _milestones(plan, sched, streak):
+    hl = data.activity_highlights(sched["today"])
+    month_km = hl["month_km"]
+    nxt = 50 * (int(month_km) // 50 + 1)        # next 50 km band this month
+    chips = [
+        ("🏅", "Longest run", f"{hl['longest_km']:.1f} km"),
+        ("📅", "This month", f"{month_km:.0f} km"),
+        ("🔥", "Streak", f"{streak} wk" if streak else "—"),
+        ("🎯", "Next up", f"{nxt - month_km:.0f} km to {nxt}"),
+    ]
+    return html.Div([
+        html.Div([html.Span(icon, className="ic"),
+                  html.Div([html.Div(val, className="val"),
+                            html.Div(lab, className="lab")], className="body")],
+                 className="gc-mile")
+        for icon, lab, val in chips
+    ], className="gc-miles")
+
+
 def render_boards(plan):
     """The dynamic, editable part of the plan (re-rendered on each edit)."""
     sched = schedule.build_schedule(plan)
     cur = sched["current_index"]
+    streak = data.running_streak_weeks(sched["today"])
     boards = [w for w in sched["weeks"] if w["week_index"] in (cur, cur + 1)]
     later = [w for w in sched["weeks"] if w["week_index"] > cur + 1]
-    out = []
+    out = [
+        _progress_hero(plan, sched, streak),
+        _today_card(sched),
+        _milestones(plan, sched, streak),
+    ]
     if boards:
         out.append(section("This week & next"))
         out.append(html.Div(
             "Drag a workout to another day to reschedule. "
-            "Use Done / Skip to log what you actually did.",
+            "Mark Done / Skip to log what you actually did.",
             className="plan-hint"))
         out.extend(_board(w) for w in boards)
     if later:
@@ -236,7 +373,8 @@ def render_boards(plan):
 
 def render_plan(plan):
     if not plan:
-        return _empty("No plan yet — set a goal and click “Generate plan”.")
+        return _empty("No plan yet — open ⚙ Plan settings above, set a goal, "
+                      "and click Generate plan.")
     macro = [dmc.Card([
         dmc.Group([dmc.Text(ph["phase"], fw=700),
                    dmc.Badge(ph["weeks"], variant="light", size="sm")],
@@ -248,56 +386,79 @@ def render_plan(plan):
 
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
-        dmc.Card([
-            dmc.Group([dmc.Text(f"Plan · {plan.get('goal','')}", fw=700, size="lg"),
-                       dmc.Group([
-                           html.Span(id="plan-save-status", className="plan-save-status"),
-                           dmc.Text(f"target {plan.get('goal_date','') or '—'} · "
-                                    f"generated {plan.get('generated_at','')[:16]}",
-                                    size="xs", c="dimmed")], gap="md")],
-                      justify="space-between"),
-            dmc.Text(plan.get("assessment", ""), size="sm", mt=4),
-        ], **CARD),
-        section("3-month macro"),
-        dmc.SimpleGrid(macro, cols={"base": 1, "sm": 2, "lg": 3}, spacing="md"),
+        html.Div(html.Span(id="plan-save-status", className="plan-save-status"),
+                 className="plan-save-row"),
         html.Div(render_boards(plan), id="plan-board"),
+        section("The bigger picture · 3 months"),
+        dmc.SimpleGrid(macro, cols={"base": 1, "sm": 2, "lg": 3}, spacing="md"),
         *([dmc.Alert(dmc.Stack([dmc.Text(f"• {n}", size="sm")
                                 for n in plan["adaptation_notes"]], gap=2),
-                     title="How this adapts", color="blue", variant="light")]
+                     title="How your plan adapts as you train", color="blue",
+                     variant="light")]
           if plan.get("adaptation_notes") else []),
     ], gap="md")
 
 
-def layout():
+def _settings_panel():
     kb_doc = kb.load_kb()
     kb_note = (f"Knowledge base v{kb_doc['version']} · {len(kb_doc['entries'])} cited topics"
                if kb_doc else "Knowledge base not built yet — run the research pass.")
+    latest = plan_mod.load_latest() or {}
+    pref_days = (plan_mod.load_prefs().get("preferred_days")
+                 or latest.get("preferred_days") or [])
+    day_picker = dmc.Stack([
+        dmc.Text("Preferred running days", size="sm", fw=600),
+        dmc.Text("Pick your usual days, then apply them to your current plan "
+                 "(no need to regenerate). You can still drag any session to move "
+                 "it for a specific week.", size="xs", c="dimmed"),
+        dmc.ChipGroup(
+            dmc.Group([dmc.Chip(d, value=d, size="sm") for d in _DAYS_SUN_FIRST],
+                      gap="xs", mt=4),
+            id="coach-days", value=pref_days, multiple=True),
+        dmc.Group([
+            dmc.Button("Apply to current plan", id="coach-days-apply",
+                       variant="light", size="xs"),
+            html.Span(id="coach-days-status", className="plan-save-status"),
+        ], gap="sm", align="center"),
+    ], gap=4)
+    body = dmc.Stack([
+        dmc.Group([
+            dmc.TextInput(id="coach-goal", placeholder="e.g. sub-50 10k", w=260,
+                          label="Race goal", value=latest.get("goal", "")),
+            dmc.TextInput(id="coach-date", placeholder="YYYY-MM-DD", w=180,
+                          label="Race date", value=latest.get("goal_date", "") or ""),
+            dmc.Button("Generate plan", id="coach-plan-btn", mt=22),
+            dmc.Button("Refresh coaching tips", id="coach-rec-btn",
+                       variant="default", mt=22),
+        ], gap="sm", align="end"),
+        day_picker,
+        dmc.Text(kb_note, size="xs", c="dimmed", className="mono"),
+    ], gap="sm")
+    return dmc.Accordion(
+        chevronPosition="right", variant="separated", className="gc-recs",
+        children=[dmc.AccordionItem([
+            dmc.AccordionControl(dmc.Group([
+                dmc.Text("⚙  Plan settings", fw=600, size="sm"),
+                dmc.Text("set your goal · regenerate your plan or tips",
+                         size="xs", c="dimmed"),
+            ], gap="sm")),
+            dmc.AccordionPanel(body, pt="sm"),
+        ], value="settings")])
+
+
+def layout():
     return dmc.Stack([
-        section("Coach console"),
-        dmc.Card([
-            dmc.Group([
-                dmc.TextInput(id="coach-goal", placeholder="Goal e.g. sub-50 10k",
-                              w=260, label="Race goal",
-                              value=(plan_mod.load_latest() or {}).get("goal", "")),
-                dmc.TextInput(id="coach-date", placeholder="YYYY-MM-DD", w=180,
-                              label="Race date",
-                              value=(plan_mod.load_latest() or {}).get("goal_date", "") or ""),
-                dmc.Button("Generate plan", id="coach-plan-btn", mt=22),
-                dmc.Button("Refresh recommendations", id="coach-rec-btn",
-                           variant="default", mt=22),
-            ], gap="sm", align="end"),
-            dmc.Text(kb_note, size="xs", c="dimmed", className="mono", mt="sm"),
-        ], className="gc-console", p="md"),
+        _settings_panel(),
         dmc.Tabs([
             dmc.TabsList([
-                dmc.TabsTab("Recommendations", value="recs"),
-                dmc.TabsTab("Plan", value="plan"),
+                dmc.TabsTab("My plan", value="plan"),
+                dmc.TabsTab("Coaching tips", value="recs"),
             ]),
-            dmc.TabsPanel(dcc.Loading(html.Div(render_recs(rec_mod.load_latest()),
-                                               id="coach-recs")), value="recs", pt="md"),
             dmc.TabsPanel(dcc.Loading(html.Div(render_plan(plan_mod.load_latest()),
                                                id="coach-plan")), value="plan", pt="md"),
-        ], value="recs"),
+            dmc.TabsPanel(dcc.Loading(html.Div(render_recs(rec_mod.load_latest()),
+                                               id="coach-recs")), value="recs", pt="md"),
+        ], value="plan"),
     ], gap="md")
 
 
@@ -309,11 +470,37 @@ def _refresh_recs(_n):
 
 @callback(Output("coach-plan", "children"), Input("coach-plan-btn", "n_clicks"),
           State("coach-goal", "value"), State("coach-date", "value"),
-          prevent_initial_call=True)
-def _make_plan(_n, goal, date):
+          State("coach-days", "value"), prevent_initial_call=True)
+def _make_plan(_n, goal, date, days):
     if not goal:
         return _empty("Enter a goal first.")
-    return render_plan(plan_mod.make_plan(goal, goal_date=date or None))
+    ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
+    return render_plan(plan_mod.make_plan(goal, goal_date=date or None,
+                                          preferred_days=ordered))
+
+
+@callback(Output("coach-days-status", "children", allow_duplicate=True),
+          Input("coach-days", "value"), prevent_initial_call=True)
+def _save_days(days):
+    ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
+    plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
+    return "Saved — click Apply to update your plan" if ordered else "Cleared"
+
+
+@callback(Output("plan-board", "children", allow_duplicate=True),
+          Output("coach-days-status", "children", allow_duplicate=True),
+          Input("coach-days-apply", "n_clicks"), State("coach-days", "value"),
+          prevent_initial_call=True)
+def _apply_days(_n, days):
+    ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
+    if not ordered:                       # fall back to the persisted selection
+        ordered = plan_mod.load_prefs().get("preferred_days") or []
+    plan = plan_mod.load_latest()
+    if not plan or not ordered:
+        return no_update, "Pick at least one day first."
+    plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
+    plan = plan_mod.apply_preferred_days(plan, ordered)
+    return render_boards(plan), "Applied to your plan ✓"
 
 
 @callback(Output("plan-board", "children"), Output("plan-save-status", "children"),
@@ -333,7 +520,7 @@ def _edit_plan(dnd, _clicks):
         if not (ctx.triggered and ctx.triggered[0]["value"]):
             raise PreventUpdate
         key, act = trig["key"], trig["act"]
-        want = "done" if act == "done" else "skipped"
+        want = "skipped" if act == "skip" else "done"
         plan = plan_mod.load_latest() or {}
         cur = (plan.get("overrides", {}).get(key) or {}).get("status")
         plan = plan_mod.set_override(key, {"status": None if cur == want else want})

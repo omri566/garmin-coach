@@ -82,14 +82,20 @@ PLAN_SCHEMA = {
 
 
 def make_plan(goal: str, goal_date: str | None = None, provider=None,
-              model: str | None = None) -> dict:
+              model: str | None = None,
+              preferred_days: list[str] | None = None) -> dict:
     provider = provider or get_provider("claude")
     brief = context.brief_text()
     science = kb.kb_context(metrics=["periodization", "polarization", "acwr",
                                      "threshold", "vo2max"]) or "(use established models.)"
     date_line = f" Target date: {goal_date}." if goal_date else ""
+    days_line = ""
+    if preferred_days:
+        days_line = (f"\n\nThe athlete prefers to run on: {', '.join(preferred_days)}. "
+                     "Place running sessions on these weekdays and rest on the "
+                     "others, unless sound training principles require otherwise.")
     prompt = (
-        f"{brief}\n\nGOAL: {goal}.{date_line}\n\n"
+        f"{brief}\n\nGOAL: {goal}.{date_line}{days_line}\n\n"
         f"# Evidence base (cite where relevant)\n{science}\n\n"
         "Design a ~3-month periodized macro plan and a detailed next-month plan "
         "(specific weekly sessions). Start from the athlete's CURRENT volume and "
@@ -99,10 +105,63 @@ def make_plan(goal: str, goal_date: str | None = None, provider=None,
     )
     plan = provider.generate_json(prompt, PLAN_SCHEMA, system=SYSTEM, model=model)
     plan["goal_date"] = goal_date
+    plan["preferred_days"] = preferred_days or []
     plan["generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
     plan["kb_version"] = (kb.load_kb() or {}).get("version")
+    if preferred_days:
+        apply_preferred_days(plan, preferred_days)   # honour the days exactly
     _save(plan)
     return plan
+
+
+_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+def apply_preferred_days(plan: dict, preferred_days: list[str]) -> dict:
+    """Re-lay out each next-month week's running sessions onto the preferred
+    weekdays (spread evenly across them), so the existing plan reflects the
+    athlete's chosen days without regenerating. Date moves are cleared (the new
+    days take effect); done/skipped history is kept. Manual drags afterwards
+    still override per session. Persists in place via save_latest."""
+    pref = [d for d in _WEEKDAYS if d in set(preferred_days)]
+    if not pref:
+        return plan
+    for wk in plan.get("next_month", []):
+        runs = [s for s in wk.get("sessions", [])
+                if (s.get("type") or "").lower() != "rest"]
+        k = len(runs)
+        if not k:
+            continue
+        if k <= len(pref):
+            idxs = [0] if k == 1 else [round(j * (len(pref) - 1) / (k - 1))
+                                       for j in range(k)]
+            chosen = [pref[i] for i in idxs]
+        else:                              # more runs than preferred days
+            chosen = pref + [r.get("day") for r in runs[len(pref):]]
+        for s, day in zip(runs, chosen):
+            s["day"] = day
+    # Clear prior date moves so the new default days show; keep done/skipped.
+    overrides = plan.get("overrides", {})
+    for key in list(overrides):
+        overrides[key].pop("date", None)
+        if not overrides[key]:
+            overrides.pop(key)
+    plan["preferred_days"] = pref
+    save_latest(plan)
+    return plan
+
+
+_PREFS_PATH = PLAN_DIR / "preferences.json"
+
+
+def load_prefs() -> dict:
+    """Athlete scheduling preferences (e.g. preferred running weekdays)."""
+    return json.loads(_PREFS_PATH.read_text()) if _PREFS_PATH.exists() else {}
+
+
+def save_prefs(prefs: dict) -> None:
+    PLAN_DIR.mkdir(parents=True, exist_ok=True)
+    _PREFS_PATH.write_text(json.dumps(prefs, indent=2))
 
 
 def _save(plan: dict) -> None:
