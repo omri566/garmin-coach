@@ -51,13 +51,18 @@ PLAN_SCHEMA = {
         "next_month": {"type": "array", "items": {
             "type": "object",
             "properties": {
-                "week": {"type": "string"},
+                "week": {"type": "string",
+                         "description": "e.g. 'Week 1 (Jun 28 – Jul 4)'. Each "
+                         "training week runs Sunday→Saturday: start on a Sunday, "
+                         "end the following Saturday."},
                 "theme": {"type": "string"},
                 "target_volume_km": {"type": "string"},
                 "sessions": {"type": "array", "items": {
                     "type": "object",
                     "properties": {
-                        "day": {"type": "string"},
+                        "day": {"type": "string",
+                                "description": "weekday abbr (Sun, Mon … Sat); "
+                                "list sessions Sunday→Saturday"},
                         "type": {"type": "string",
                                  "description": "easy / long / tempo / intervals / rest / cross"},
                         "description": {"type": "string"},
@@ -88,7 +93,9 @@ def make_plan(goal: str, goal_date: str | None = None, provider=None,
         f"# Evidence base (cite where relevant)\n{science}\n\n"
         "Design a ~3-month periodized macro plan and a detailed next-month plan "
         "(specific weekly sessions). Start from the athlete's CURRENT volume and "
-        "fitness — do not jump load. Favour 80/20 polarized intensity."
+        "fitness — do not jump load. Favour 80/20 polarized intensity. "
+        "Training weeks run Sunday→Saturday: label each next-month week with its "
+        "Sunday-start and Saturday-end dates, and order its sessions Sun→Sat."
     )
     plan = provider.generate_json(prompt, PLAN_SCHEMA, system=SYSTEM, model=model)
     plan["goal_date"] = goal_date

@@ -23,6 +23,13 @@ import re
 from garmin_coach.store import db
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+WEEK_START = 6  # training weeks run Sunday -> Saturday (Mon=0 … Sun=6)
+
+
+def _week_start(d: dt.date) -> dt.date:
+    """The Sunday on or before d — the start of d's training week."""
+    return d - dt.timedelta(days=(d.weekday() - WEEK_START) % 7)
+
 _MONTHS = {m: i for i, m in enumerate(
     ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
      "Nov", "Dec"], 1)}
@@ -139,9 +146,11 @@ def build_schedule(plan: dict, today: dt.date | None = None) -> dict:
         rng = parse_week_range(wk.get("week", ""), base_year, today)
         if not rng:                       # fallback: 7-day block from generation
             anchor = _iso((plan.get("generated_at") or "")[:10]) or today
-            start = anchor + dt.timedelta(days=7 * wi)
-            rng = (start, start + dt.timedelta(days=6))
-        parsed.append((wi, wk, rng[0], rng[1]))
+            rng = (anchor + dt.timedelta(days=7 * wi), None)
+        # Snap to a Sunday→Saturday window so the week reads Sun-first.
+        start = _week_start(rng[0])
+        end = start + dt.timedelta(days=6)
+        parsed.append((wi, wk, start, end))
 
     # Current week = first week whose end is today or later (else the last one).
     cur = next((wi for wi, _, _, e in parsed if e >= today),
@@ -176,8 +185,10 @@ def build_schedule(plan: dict, today: dt.date | None = None) -> dict:
         done = sum(1 for s in sessions
                    if s["status"] == "done" and (s["type"] or "").lower() != "rest")
         total = sum(1 for s in sessions if (s["type"] or "").lower() != "rest")
+        base_label = (wk.get("week") or f"Week {wi + 1}").split("(")[0].strip()
+        label = f"{base_label or f'Week {wi + 1}'} ({start:%b %-d} – {end:%b %-d})"
         weeks_out.append({
-            "week_index": wi, "label": wk.get("week", f"Week {wi + 1}"),
+            "week_index": wi, "label": label,
             "theme": wk.get("theme", ""), "target_volume": wk.get("target_volume_km", ""),
             "start": start, "end": end, "editable": editable,
             "is_current": wi == cur, "days": days, "sessions": sessions,
