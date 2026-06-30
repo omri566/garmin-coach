@@ -50,7 +50,14 @@ def _end_label(fig, df, col, color, fmt="{:.0f}", yaxis="y"):
     s = df[col].dropna()
     if s.empty:
         return
-    fig.add_annotation(x=s.index[-1], y=float(s.iloc[-1]), yref=yaxis,
+    # Anchor the label at the real date. Frames built by rolling_metric carry the
+    # date in a "date" column over a positional RangeIndex; using s.index there
+    # would place the label at an integer (e.g. 273), which a date x-axis reads
+    # as ~1970 and which drags the whole auto-range back to the epoch. Frames
+    # like the load series are DatetimeIndex-indexed, so the index is the date.
+    last = s.index[-1]
+    x = df["date"].loc[last] if "date" in df.columns else last
+    fig.add_annotation(x=x, y=float(s.iloc[-1]), yref=yaxis,
                        text=" " + fmt.format(float(s.iloc[-1])), showarrow=False,
                        xanchor="left", font=dict(family=_MONO, size=12, color=color))
 
