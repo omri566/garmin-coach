@@ -90,17 +90,48 @@ def _runs_between(start: dt.date, end: dt.date) -> list[dict]:
 
 
 def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
-    """Greedily link each run to the nearest open non-rest session in the week.
+    """Link completed runs to the planned sessions they satisfy.
 
-    Returns the runs that found no slot (genuine extras). Sessions manually
-    marked done/skipped are not auto-matched over.
+    A run is anchored to the day it was *actually performed* (its real start
+    date), never to the day it happened to be synced. Matching runs in two
+    passes so a late-synced run can't drift onto a neighbouring day:
+
+      1. Same-day — a run lands on the non-rest session planned for its own day.
+         This holds even when the athlete already marked that day done/skipped:
+         the run is *consumed* by its own day so it can never spill onto another
+         session (the late-sync-matched-the-wrong-day bug).
+      2. Nearest — a run with no session on its own day attaches to the closest
+         still-open non-rest session in the week ("did the workout a day
+         early/late"), preferring an upcoming session on a tie.
+
+    Returns the runs that found no slot (genuine extras). Sessions the athlete
+    manually marked done/skipped are never auto-matched over.
     """
-    slots = [s for s in sessions
-             if (s["type"] or "").lower() != "rest"
-             and s.get("status_override") not in ("done", "skipped")]
+    non_rest = [s for s in sessions if (s["type"] or "").lower() != "rest"]
     used: set[int] = set()
-    extras: list[dict] = []
+    leftover: list[dict] = []
+
+    # Pass 1: anchor each run to a session on the exact day it was run.
     for run in runs:
+        rdate = _run_date(run["start_time"])
+        same_day = next((s for s in non_rest
+                         if s["date"] == rdate and id(s) not in used), None)
+        if same_day is None:
+            leftover.append(run)
+            continue
+        used.add(id(same_day))
+        # A manually done/skipped day still consumes its own run (no spill), but
+        # the athlete's manual status is left untouched.
+        if same_day.get("status_override") not in ("done", "skipped"):
+            same_day["match"] = run
+            same_day["match_date"] = rdate
+
+    # Pass 2: runs with no same-day session attach to the nearest open session.
+    slots = [s for s in non_rest
+             if id(s) not in used
+             and s.get("status_override") not in ("done", "skipped")]
+    extras: list[dict] = []
+    for run in leftover:
         rdate = _run_date(run["start_time"])
         cands = [s for s in slots if id(s) not in used]
         if not cands:

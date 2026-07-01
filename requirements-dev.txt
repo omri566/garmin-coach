@@ -1,3 +1,4 @@
 # Dev/test tooling
 -r requirements.txt
+pytest       # unit test suite (tests/); run: pytest
 playwright   # headless browser smoke test (tools/browser_check.py); run: playwright install chromium
