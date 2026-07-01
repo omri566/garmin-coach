@@ -43,3 +43,33 @@ repoints `config`, `store.db`, and `coach.plan` paths at a scratch dir). Run:
 pip install -r requirements.txt -r requirements-dev.txt
 pytest
 ```
+
+The suite covers the pure-function core:
+
+- `test_load.py` — training-load model (`analytics/load.py`): CTL/ATL/TSB/ACWR,
+  ramp, `current_state`, `load_series`.
+- `test_features.py` — per-activity features (`analytics/features.py`): TRIMP,
+  efficiency factor, decoupling, HR-zone distribution.
+- `test_schedule.py` — plan scheduling (`coach/schedule.py`): `parse_week_range`
+  and `build_schedule` status logic + Sunday→Saturday date anchoring.
+- `test_llm_provider.py` — LLM JSON extraction (`llm/provider.py`) and
+  `ClaudeCodeProvider` with the `claude` CLI subprocess mocked.
+- `test_figures_dates.py`, `test_schedule_matching.py` — dashboard date-axis and
+  run-matching regressions (see the sections above).
+
+Hermeticity notes — no test hits the network, Garmin, or a real LLM:
+
+- The autouse `gc_data` fixture points every data path at a per-test `tmp_path`
+  scratch dir and seeds a fresh schema via the project's own DDL, so tests never
+  touch the real data dir. `GC_DATA_DIR` is therefore optional locally; CI sets
+  it to a throwaway dir as belt-and-suspenders.
+- The `claude` CLI subprocess in `llm/provider.py` is mocked via
+  `monkeypatch.setattr(provider.subprocess, "run", ...)`.
+
+CI (`.github/workflows/ci.yml`) runs `pytest` on Python 3.13. It installs
+`requirements.txt` + `requirements-dev.txt`; `pytest` config (including
+`pythonpath = ["."]`, needed so the flat-layout `garmin_coach` package imports
+under a bare `pytest`) lives in `pyproject.toml`. Ruff runs there non-blocking;
+the existing codebase predates a lint baseline, so only `tests/` is expected to
+be ruff-clean. The Playwright smoke test (`tools/browser_check.py`) needs a live
+dashboard + real data and is **not** part of CI.

@@ -74,6 +74,12 @@ garmin_coach/
     ui.py            #   shared UI helpers
 tools/
   browser_check.py   # headless-browser smoke test for the dashboard
+tests/               # hermetic pytest unit suite over the pure-function core
+  conftest.py        #   autouse fixture: scratch data dir + fresh schema
+  test_load.py       #   training-load model (CTL/ATL/TSB/ACWR)
+  test_features.py   #   per-activity features (TRIMP, EF, decoupling, zones)
+  test_schedule.py   #   plan scheduling + run/session matching
+  test_llm_provider.py #   LLM JSON extraction (mocked claude CLI)
 ```
 
 ---
