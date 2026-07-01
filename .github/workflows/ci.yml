@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Unit tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint (ruff, non-blocking)
+        # The suite is the gate; lint runs for visibility but never fails CI
+        # since the existing codebase predates a lint baseline.
+        run: ruff check tests/ || true
+
+      - name: Run tests
+        # Hermetic by construction: GC_DATA_DIR points at a throwaway dir so the
+        # suite never touches real data, Garmin, or an LLM.
+        env:
+          GC_DATA_DIR: ${{ runner.temp }}/gc-data
+        run: pytest

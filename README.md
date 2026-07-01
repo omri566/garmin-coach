@@ -65,6 +65,20 @@ Recommendations + plan are also generated from the dashboard's **Coach** tab.
 - `data/streams/<id>.parquet` — dense per-second streams (pace, HR, cadence, running dynamics, GPS…).
 - `data/fit/<id>.fit` — raw FIT files, source of truth.
 
+## Tests
+
+A hermetic pytest suite (`tests/`) covers the pure-function core — training-load
+model, per-activity features, plan scheduling, and LLM JSON extraction — with no
+network, Garmin login, or real LLM calls. Run it with:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+GitHub Actions runs the suite on every push/PR (`.github/workflows/ci.yml`).
+See `AGENTS.md` for details.
+
 ## Status
 - **Phase 1 (ingest + storage) — complete.** Activities + daily health, incremental, max-fidelity.
 - **Phase 2 (analytics) — core complete.** Per-activity features, CTL/ATL/TSB/ACWR load model, trend layer.

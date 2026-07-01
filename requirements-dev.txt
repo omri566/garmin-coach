@@ -1,4 +1,5 @@
 # Dev/test tooling
 -r requirements.txt
-pytest       # unit test suite (tests/); run: pytest
+pytest>=8    # unit-test suite over the analytics / coaching / llm core (tests/)
+ruff>=0.6    # lint + format check
 playwright   # headless browser smoke test (tools/browser_check.py); run: playwright install chromium

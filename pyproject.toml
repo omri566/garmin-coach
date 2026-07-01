@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# Put the repo root on sys.path so the flat-layout `garmin_coach` package imports
+# under a bare `pytest` invocation (which, unlike `python -m pytest`, does not add
+# the cwd) — this is what CI runs.
+pythonpath = ["."]
+# Keep the suite hermetic: tests run offline against a scratch SQLite + synthetic
+# DataFrames; they never hit Garmin, the network, or a real LLM.
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+# Lightweight, non-invasive rule set — this project's lint baseline, not a cleanup.
+select = ["E", "F", "I"]
+ignore = ["E501"]  # long lines are common in the analytics docstrings/SQL
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # tests import after path/fixture setup
