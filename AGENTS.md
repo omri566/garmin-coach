@@ -24,12 +24,23 @@ to the epoch (and makes the 3M/1Y/5Y range buttons look dead). See
   `startTimeLocal`), never the sync/ingest time (`ingested_at` / `computed_at`,
   which can be a day later for a late sync).
 - `_automatch` runs two passes: (1) same-day — a run lands on the non-rest
-  session planned for its own date, and is *consumed* there even if that day was
-  manually marked done/skipped (so it can't spill onto a neighbouring session);
-  (2) nearest — a run with no session on its own day attaches to the closest
-  open session ("did it a day early/late"). Without pass 1, a Monday run whose
-  Monday session was already marked done would greedily grab a later open
-  session (e.g. Wednesday) — the late-sync-matched-the-wrong-day bug.
+  session planned for its own date, and is *consumed and attributed* (`match`)
+  there even if that day was manually marked done/skipped (so it can't spill
+  onto a neighbouring session); (2) nearest — a run with no session on its own
+  day attaches to the closest open session ("did it a day early/late"). Without
+  pass 1, a Monday run whose Monday session was already marked done would
+  greedily grab a later open session (e.g. Wednesday) — the
+  late-sync-matched-the-wrong-day bug.
+- `match` is the run→session attribution and is set on the same-day session
+  **regardless of manual status** — it is a fact ("this run happened on this
+  planned day"), separate from the *displayed* status which `_status` keeps
+  authoritative (skipped stays skipped; done stays done, no drift note for a
+  same-day match). This is deliberate: the overview's "Versus plan" card
+  recognises a run as planned **only** via `match.activity_id`
+  (`dashboard/pages/overview.py:_matched_session`), so withholding `match` from a
+  manually-done day made the plan view show the session done while the overview
+  flagged the same run as an "extra — not in plan". Keep `match` complete so the
+  two views can never disagree. See `test_manually_done_session_still_exposes_its_run_match`.
 - A matched session shows `done` regardless of override, so an auto-match landing
   on the wrong session also blocks the athlete from clearing it manually; keeping
   runs anchored to their own day is what makes the manual done/skip toggle stick.
