@@ -95,6 +95,26 @@ def test_run_anchored_to_start_date_when_a_session_exists_that_day(add_metric):
     assert by_day["Wed"]["status"] != "done"
 
 
+def test_manually_done_session_still_exposes_its_run_match(add_metric):
+    """A manually-done day keeps the run→session link so the overview agrees.
+
+    Regression: marking the day's session done (the natural post-run action)
+    must not strip the run's `match`. The plan view shows the session done via
+    the override; the overview recognises the run as planned only through
+    `match.activity_id`. Before the fix the same-day run was silently consumed
+    without a `match`, so the overview flagged an on-plan run as an "extra".
+    """
+    add_metric("2026-06-24T08:00:00", distance_m=5000.0)   # Wednesday run
+    overrides = {"0:2": {"status": "done"}}                 # athlete marked Wed done
+    by_day = _by_day(schedule.build_schedule(base_plan(overrides=overrides),
+                                             today=TODAY))
+    wed = by_day["Wed"]
+    assert wed["status"] == "done"                          # manual status preserved
+    assert wed.get("match") is not None                     # run stays attributed
+    assert wed["match_date"] == dt.date(2026, 6, 24)
+    assert wed["note"] is None                              # same-day: no drift note
+
+
 def test_off_day_run_still_attaches_to_nearest_open_session(add_metric):
     """A run with no session on its own day keeps the 'did it early/late' note."""
     # Thursday run: no Thursday session -> nearest open is Wednesday.

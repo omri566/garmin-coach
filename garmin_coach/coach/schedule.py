@@ -96,10 +96,12 @@ def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
     date), never to the day it happened to be synced. Matching runs in two
     passes so a late-synced run can't drift onto a neighbouring day:
 
-      1. Same-day — a run lands on the non-rest session planned for its own day.
-         This holds even when the athlete already marked that day done/skipped:
-         the run is *consumed* by its own day so it can never spill onto another
-         session (the late-sync-matched-the-wrong-day bug).
+      1. Same-day — a run lands on (and is attributed to) the non-rest session
+         planned for its own day. This holds even when the athlete already marked
+         that day done/skipped: the run is *consumed* and *recorded* on its own
+         day so it can never spill onto another session (the
+         late-sync-matched-the-wrong-day bug) and both the plan view and the
+         overview see the same run→session link.
       2. Nearest — a run with no session on its own day attaches to the closest
          still-open non-rest session in the week ("did the workout a day
          early/late"), preferring an upcoming session on a tie.
@@ -120,11 +122,16 @@ def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
             leftover.append(run)
             continue
         used.add(id(same_day))
-        # A manually done/skipped day still consumes its own run (no spill), but
-        # the athlete's manual status is left untouched.
-        if same_day.get("status_override") not in ("done", "skipped"):
-            same_day["match"] = run
-            same_day["match_date"] = rdate
+        # Attribute the run to its own-day session even when that day was
+        # manually marked done/skipped. The run genuinely happened there, so the
+        # attribution (`match`) is a *fact* independent of the manual status:
+        # `_status` below keeps the manual status authoritative (skipped stays
+        # skipped; done stays done, and a same-day match adds no drift note).
+        # Recording the match here is the single source of truth that lets the
+        # overview recognise the run as planned instead of flagging it an
+        # "extra" — without it the overview and the plan view disagree.
+        same_day["match"] = run
+        same_day["match_date"] = rdate
 
     # Pass 2: runs with no same-day session attach to the nearest open session.
     slots = [s for s in non_rest
