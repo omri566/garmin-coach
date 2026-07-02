@@ -185,10 +185,11 @@ def _day_column(day, week):
            "data-editable": "1" if week["editable"] else "0"})
 
 
-def _board(week):
-    badge = dmc.Badge("This week" if week["is_current"] else "Next week",
-                      color="yellow" if week["is_current"] else "gray",
-                      variant="light", size="sm")
+def _board(week, tag=None, tag_color=None):
+    if tag is None:
+        tag = "This week" if week["is_current"] else "Next week"
+        tag_color = "yellow" if week["is_current"] else "gray"
+    badge = dmc.Badge(tag, color=tag_color or "gray", variant="light", size="sm")
     head = html.Div([
         html.Div([dmc.Text(week["label"], fw=700, size="sm"), badge],
                  style={"display": "flex", "gap": "10px", "alignItems": "center"}),
@@ -201,21 +202,17 @@ def _board(week):
     return html.Div([head, grid], className="plan-board-week")
 
 
-def _later_table(week):
-    rows = [html.Tr([
-        html.Td(f"{s['date']:%a}"),
-        html.Td(dmc.Badge(s["type"], color=TYPE_COLOR.get((s["type"] or "").lower(),
-                          "gray"), variant="light", size="xs")),
-        html.Td(s["description"]),
-        html.Td(dmc.Text(s.get("target", ""), size="xs", c="dimmed")),
-    ]) for s in week["sessions"] if (s["type"] or "").lower() != "rest"]
-    return dmc.Card([
-        dmc.Group([dmc.Text(week["label"], fw=700, size="sm"),
-                   dmc.Text(week["theme"], c="dimmed", size="xs")]),
-        dmc.Table([html.Thead(html.Tr([html.Th(h) for h in
-                   ["Day", "Type", "Session", "Target"]])),
-                   html.Tbody(rows)], striped=True),
-    ], **CARD)
+def _look_ahead(later):
+    """A collapsed control to peek at any single future week on demand, instead
+    of dumping every later week on the page."""
+    opts = [{"value": str(w["week_index"]), "label": w["label"]} for w in later]
+    return html.Div([
+        section("Look ahead"),
+        dmc.Select(id="plan-week-peek", data=opts, clearable=True, searchable=True,
+                   placeholder="Jump to a future week…", w=340, size="sm",
+                   comboboxProps={"withinPortal": True}),
+        html.Div(id="plan-week-peek-out", className="plan-peek"),
+    ])
 
 
 def _countdown(goal_date, today):
@@ -360,42 +357,58 @@ def render_boards(plan):
     ]
     if boards:
         out.append(section("This week & next"))
-        out.append(html.Div(
-            "Drag a workout to another day to reschedule. "
-            "Mark Done / Skip to log what you actually did.",
-            className="plan-hint"))
+        out.append(html.Div("Drag to reschedule · Done / Skip to log.",
+                            className="plan-hint"))
         out.extend(_board(w) for w in boards)
     if later:
-        out.append(section("Later weeks"))
-        out.extend(_later_table(w) for w in later)
+        out.append(_look_ahead(later))
     return out
+
+
+def _macro_chip(ph):
+    """A compact phase card — just the phase name + week range. The focus,
+    volume and key workouts are tucked into a hover card so the page stays calm
+    but the detail is one hover away."""
+    weeks = ph.get("weeks", "")
+    weeks_short = weeks.split("(")[0].strip().title() or weeks
+    m = re.search(r"\((.*?)\)", weeks)
+    date_range = m.group(1) if m else ""
+    card = dmc.Card(dmc.Stack([
+        dmc.Text(ph["phase"], fw=700, size="sm"),
+        dmc.Badge(weeks_short, variant="light", size="xs"),
+    ], gap=6), **CARD)
+
+    dd = [dmc.Text(ph["phase"], fw=700, size="sm")]
+    if date_range:
+        dd.append(dmc.Text(date_range, size="xs", c="dimmed", className="mono"))
+    if ph.get("focus"):
+        dd.append(dmc.Text(ph["focus"], size="xs", c="dimmed",
+                           style={"lineHeight": 1.5}))
+    if ph.get("weekly_volume_km"):
+        dd.append(dmc.Text(f"Volume · {ph['weekly_volume_km']}/wk", size="xs",
+                           c="dimmed"))
+    if ph.get("key_workouts"):
+        dd.append(dmc.Stack([dmc.Text(f"• {w}", size="xs", c="dimmed")
+                             for w in ph["key_workouts"]], gap=2))
+    return dmc.HoverCard(
+        [dmc.HoverCardTarget(card),
+         dmc.HoverCardDropdown(dmc.Stack(dd, gap=6), style={"maxWidth": 340})],
+        withArrow=True, shadow="lg", position="top", openDelay=120, width=340)
 
 
 def render_plan(plan):
     if not plan:
         return _empty("No plan yet — open ⚙ Plan settings above, set a goal, "
                       "and click Generate plan.")
-    macro = [dmc.Card([
-        dmc.Group([dmc.Text(ph["phase"], fw=700),
-                   dmc.Badge(ph["weeks"], variant="light", size="sm")],
-                  justify="space-between"),
-        dmc.Text(ph["focus"], size="sm", c="dimmed", mt=4),
-        *([dmc.Text(f"Volume: {ph['weekly_volume_km']} km/wk", size="xs", c="dimmed", mt=2)]
-          if ph.get("weekly_volume_km") else []),
-    ], **CARD) for ph in plan.get("macro", [])]
+    macro = [_macro_chip(ph) for ph in plan.get("macro", [])]
 
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
         html.Div(html.Span(id="plan-save-status", className="plan-save-status"),
                  className="plan-save-row"),
         html.Div(render_boards(plan), id="plan-board"),
-        section("The bigger picture · 3 months"),
-        dmc.SimpleGrid(macro, cols={"base": 1, "sm": 2, "lg": 3}, spacing="md"),
-        *([dmc.Alert(dmc.Stack([dmc.Text(f"• {n}", size="sm")
-                                for n in plan["adaptation_notes"]], gap=2),
-                     title="How your plan adapts as you train", color="blue",
-                     variant="light")]
-          if plan.get("adaptation_notes") else []),
+        section("The bigger picture"),
+        dmc.SimpleGrid(macro, cols={"base": 2, "sm": 3, "lg": 4}, spacing="sm"),
     ], gap="md")
 
 
@@ -501,6 +514,22 @@ def _apply_days(_n, days):
     plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
     plan = plan_mod.apply_preferred_days(plan, ordered)
     return render_boards(plan), "Applied to your plan ✓"
+
+
+@callback(Output("plan-week-peek-out", "children"),
+          Input("plan-week-peek", "value"), prevent_initial_call=True)
+def _peek_week(val):
+    """Render a single chosen future week, read-only, under the Look-ahead select."""
+    if not val:
+        return None
+    plan = plan_mod.load_latest()
+    if not plan:
+        raise PreventUpdate
+    sched = schedule.build_schedule(plan)
+    wk = next((w for w in sched["weeks"] if str(w["week_index"]) == str(val)), None)
+    if not wk:
+        return None
+    return _board(wk, tag="Preview", tag_color="grape")
 
 
 @callback(Output("plan-board", "children"), Output("plan-save-status", "children"),
