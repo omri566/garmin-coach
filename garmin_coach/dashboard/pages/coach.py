@@ -185,7 +185,7 @@ def _day_column(day, week):
            "data-editable": "1" if week["editable"] else "0"})
 
 
-def _board(week, tag=None, tag_color=None):
+def _board(week, tag=None, tag_color=None, anim=""):
     if tag is None:
         tag = "This week" if week["is_current"] else "Next week"
         tag_color = "yellow" if week["is_current"] else "gray"
@@ -199,7 +199,8 @@ def _board(week, tag=None, tag_color=None):
     ], className="plan-week-head")
     grid = html.Div([_day_column(day, week) for day in week["days"]],
                     className="plan-board-grid")
-    return html.Div([head, grid], className="plan-board-week")
+    return html.Div([head, grid],
+                    className="plan-board-week" + (f" {anim}" if anim else ""))
 
 
 def _week_tag(wk, cur):
@@ -226,15 +227,30 @@ def _week_nav():
     ], className="plan-week-nav")
 
 
-def _render_week_body(plan, idx):
-    """The one navigated week, as a board (editable only for this/next week)."""
+def _view(data):
+    """Unpack the plan-week-view store into (index, direction)."""
+    if isinstance(data, dict):
+        return data.get("idx"), data.get("dir", 0)
+    return data, 0
+
+
+def _render_week_body(plan, data, animate=True):
+    """The one navigated week, as a board (editable only for this/next week).
+
+    ``animate`` adds a directional slide-in class when the week changed via the
+    arrows; edits re-render in place with no slide so a Done toggle doesn't lurch.
+    """
     sched = schedule.build_schedule(plan)
     cur = sched["current_index"]
     weeks = sched["weeks"]
+    idx, direction = _view(data)
     idx = cur if idx is None else max(0, min(len(weeks) - 1, idx))
     wk = weeks[idx]
     tag, color = _week_tag(wk, cur)
-    return _board(wk, tag=tag, tag_color=color)
+    anim = ""
+    if animate and direction:
+        anim = "wk-next" if direction > 0 else "wk-prev"
+    return _board(wk, tag=tag, tag_color=color, anim=anim)
 
 
 def _countdown(goal_date, today):
@@ -378,31 +394,32 @@ def render_boards(plan):
     ]
 
 
-def _macro_state(ph, base_year, today):
-    """Where 'today' sits relative to a phase's date range: past / current /
-    future (or '' if the range can't be parsed)."""
+def _macro_progress(ph, base_year, today):
+    """(state, percent-complete) for a phase relative to today's date."""
     rng = schedule.parse_week_range(ph.get("weeks", ""), base_year, today)
     if not rng:
-        return ""
+        return "", 0
     start, end = rng
     if today > end:
-        return "past"
+        return "past", 100
     if today < start:
-        return "future"
-    return "current"
+        return "future", 0
+    span = (end - start).days or 1
+    return "current", max(0, min(100, round(100 * (today - start).days / span)))
 
 
-def _phase_node(ph, i, state):
-    """One segment in the bigger-picture timeline, with detail on hover."""
+def _phase_node(ph, i, state, pct):
+    """One sleek accent card in the bigger-picture strip, with detail on hover."""
     weeks = ph.get("weeks", "")
     weeks_short = weeks.split("(")[0].strip().title() or weeks
     num = "✓" if state == "past" else str(i + 1)
     node = html.Div([
-        html.Span(num, className="gc-phase-num"),
         html.Div([
+            html.Span(num, className="gc-phase-num"),
             html.Div(ph["phase"], className="gc-phase-name"),
-            html.Div(weeks_short, className="gc-phase-weeks"),
-        ], className="gc-phase-txt"),
+        ], className="gc-phase-row"),
+        html.Div(weeks_short, className="gc-phase-weeks"),
+        html.Div(html.I(style={"width": f"{pct}%"}), className="gc-phase-bar"),
     ], className="gc-phase" + (f" {state}" if state else ""))
 
     m = re.search(r"\((.*?)\)", weeks)
@@ -432,8 +449,11 @@ def _macro_timeline(plan, today):
         base_year = dt.date.fromisoformat((plan.get("generated_at") or "")[:10]).year
     except (ValueError, TypeError):
         base_year = today.year
-    return html.Div([_phase_node(ph, i, _macro_state(ph, base_year, today))
-                     for i, ph in enumerate(phases)], className="gc-phase-timeline")
+    nodes = []
+    for i, ph in enumerate(phases):
+        state, pct = _macro_progress(ph, base_year, today)
+        nodes.append(_phase_node(ph, i, state, pct))
+    return html.Div(nodes, className="gc-phase-timeline")
 
 
 def render_plan(plan):
@@ -443,7 +463,7 @@ def render_plan(plan):
     sched = schedule.build_schedule(plan)
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
-        dcc.Store(id="plan-week-view", data=sched["current_index"]),
+        dcc.Store(id="plan-week-view", data={"idx": sched["current_index"], "dir": 0}),
         html.Div(html.Span(id="plan-save-status", className="plan-save-status"),
                  className="plan-save-row"),
         html.Div(render_boards(plan), id="plan-board"),
@@ -559,32 +579,35 @@ def _apply_days(_n, days, viewed):
         return no_update, no_update, "Pick at least one day first."
     plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
     plan = plan_mod.apply_preferred_days(plan, ordered)
-    return (render_boards(plan), _render_week_body(plan, viewed),
+    return (render_boards(plan), _render_week_body(plan, viewed, animate=False),
             "Applied to your plan ✓")
 
 
 @callback(Output("plan-week-view", "data"),
           Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
           State("plan-week-view", "data"), prevent_initial_call=True)
-def _nav_week(_p, _n, cur):
-    """Step the viewed week back/forward, clamped to the weeks the plan covers."""
+def _nav_week(_p, _n, data):
+    """Step the viewed week back/forward, clamped to the weeks the plan covers.
+    Records the direction so the board can slide in the matching way."""
     if not (ctx.triggered and ctx.triggered[0]["value"]):
         raise PreventUpdate
     plan = plan_mod.load_latest()
     if not plan:
         raise PreventUpdate
     sched = schedule.build_schedule(plan)
-    cur = sched["current_index"] if cur is None else cur
-    cur += -1 if ctx.triggered_id == "plan-week-prev" else 1
-    return max(0, min(len(sched["weeks"]) - 1, cur))
+    idx, _ = _view(data)
+    idx = sched["current_index"] if idx is None else idx
+    direction = -1 if ctx.triggered_id == "plan-week-prev" else 1
+    idx = max(0, min(len(sched["weeks"]) - 1, idx + direction))
+    return {"idx": idx, "dir": direction}
 
 
 @callback(Output("plan-week-body", "children"), Input("plan-week-view", "data"))
-def _show_week(idx):
+def _show_week(data):
     plan = plan_mod.load_latest()
     if not plan:
         raise PreventUpdate
-    return _render_week_body(plan, idx)
+    return _render_week_body(plan, data, animate=True)
 
 
 @callback(Output("plan-board", "children"),
@@ -616,4 +639,5 @@ def _edit_plan(dnd, _clicks, viewed):
         raise PreventUpdate
     if plan is None:
         raise PreventUpdate
-    return render_boards(plan), _render_week_body(plan, viewed), status
+    return (render_boards(plan), _render_week_body(plan, viewed, animate=False),
+            status)
