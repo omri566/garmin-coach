@@ -202,17 +202,39 @@ def _board(week, tag=None, tag_color=None):
     return html.Div([head, grid], className="plan-board-week")
 
 
-def _look_ahead(later):
-    """A collapsed control to peek at any single future week on demand, instead
-    of dumping every later week on the page."""
-    opts = [{"value": str(w["week_index"]), "label": w["label"]} for w in later]
+def _week_tag(wk, cur):
+    """(badge label, colour) describing a week relative to the current one."""
+    i = wk["week_index"]
+    if i == cur:
+        return "This week", "yellow"
+    if i == cur + 1:
+        return "Next week", "teal"
+    if i < cur:
+        done = wk["total"] and wk["done"] >= wk["total"]
+        return ("Completed" if done else "Past"), "gray"
+    return (f"In {i - cur} weeks", "grape")
+
+
+def _week_nav():
+    """Static shell: prev/next arrows around the single-week board container."""
     return html.Div([
-        section("Look ahead"),
-        dmc.Select(id="plan-week-peek", data=opts, clearable=True, searchable=True,
-                   placeholder="Jump to a future week…", w=340, size="sm",
-                   comboboxProps={"withinPortal": True}),
-        html.Div(id="plan-week-peek-out", className="plan-peek"),
-    ])
+        html.Button("‹", id="plan-week-prev", n_clicks=0,
+                    className="plan-nav-arrow", **{"aria-label": "Previous week"}),
+        html.Div(id="plan-week-body", className="plan-week-single"),
+        html.Button("›", id="plan-week-next", n_clicks=0,
+                    className="plan-nav-arrow", **{"aria-label": "Next week"}),
+    ], className="plan-week-nav")
+
+
+def _render_week_body(plan, idx):
+    """The one navigated week, as a board (editable only for this/next week)."""
+    sched = schedule.build_schedule(plan)
+    cur = sched["current_index"]
+    weeks = sched["weeks"]
+    idx = cur if idx is None else max(0, min(len(weeks) - 1, idx))
+    wk = weeks[idx]
+    tag, color = _week_tag(wk, cur)
+    return _board(wk, tag=tag, tag_color=color)
 
 
 def _countdown(goal_date, today):
@@ -344,43 +366,49 @@ def _milestones(plan, sched, streak):
 
 
 def render_boards(plan):
-    """The dynamic, editable part of the plan (re-rendered on each edit)."""
+    """Progress summary (hero + today + milestones). The week board itself is
+    navigated separately via the prev/next controls, so only this part is
+    re-rendered when overall progress changes."""
     sched = schedule.build_schedule(plan)
-    cur = sched["current_index"]
     streak = data.running_streak_weeks(sched["today"])
-    boards = [w for w in sched["weeks"] if w["week_index"] in (cur, cur + 1)]
-    later = [w for w in sched["weeks"] if w["week_index"] > cur + 1]
-    out = [
+    return [
         _progress_hero(plan, sched, streak),
         _today_card(sched),
         _milestones(plan, sched, streak),
     ]
-    if boards:
-        out.append(section("This week & next"))
-        out.append(html.Div("Drag to reschedule · Done / Skip to log.",
-                            className="plan-hint"))
-        out.extend(_board(w) for w in boards)
-    if later:
-        out.append(_look_ahead(later))
-    return out
 
 
-def _macro_chip(ph):
-    """A compact phase card — just the phase name + week range. The focus,
-    volume and key workouts are tucked into a hover card so the page stays calm
-    but the detail is one hover away."""
+def _macro_state(ph, base_year, today):
+    """Where 'today' sits relative to a phase's date range: past / current /
+    future (or '' if the range can't be parsed)."""
+    rng = schedule.parse_week_range(ph.get("weeks", ""), base_year, today)
+    if not rng:
+        return ""
+    start, end = rng
+    if today > end:
+        return "past"
+    if today < start:
+        return "future"
+    return "current"
+
+
+def _phase_node(ph, i, state):
+    """One segment in the bigger-picture timeline, with detail on hover."""
     weeks = ph.get("weeks", "")
     weeks_short = weeks.split("(")[0].strip().title() or weeks
-    m = re.search(r"\((.*?)\)", weeks)
-    date_range = m.group(1) if m else ""
-    card = dmc.Card(dmc.Stack([
-        dmc.Text(ph["phase"], fw=700, size="sm"),
-        dmc.Badge(weeks_short, variant="light", size="xs"),
-    ], gap=6), **CARD)
+    num = "✓" if state == "past" else str(i + 1)
+    node = html.Div([
+        html.Span(num, className="gc-phase-num"),
+        html.Div([
+            html.Div(ph["phase"], className="gc-phase-name"),
+            html.Div(weeks_short, className="gc-phase-weeks"),
+        ], className="gc-phase-txt"),
+    ], className="gc-phase" + (f" {state}" if state else ""))
 
+    m = re.search(r"\((.*?)\)", weeks)
     dd = [dmc.Text(ph["phase"], fw=700, size="sm")]
-    if date_range:
-        dd.append(dmc.Text(date_range, size="xs", c="dimmed", className="mono"))
+    if m:
+        dd.append(dmc.Text(m.group(1), size="xs", c="dimmed", className="mono"))
     if ph.get("focus"):
         dd.append(dmc.Text(ph["focus"], size="xs", c="dimmed",
                            style={"lineHeight": 1.5}))
@@ -391,24 +419,40 @@ def _macro_chip(ph):
         dd.append(dmc.Stack([dmc.Text(f"• {w}", size="xs", c="dimmed")
                              for w in ph["key_workouts"]], gap=2))
     return dmc.HoverCard(
-        [dmc.HoverCardTarget(card),
+        [dmc.HoverCardTarget(node),
          dmc.HoverCardDropdown(dmc.Stack(dd, gap=6), style={"maxWidth": 340})],
         withArrow=True, shadow="lg", position="top", openDelay=120, width=340)
+
+
+def _macro_timeline(plan, today):
+    phases = plan.get("macro", [])
+    if not phases:
+        return None
+    try:
+        base_year = dt.date.fromisoformat((plan.get("generated_at") or "")[:10]).year
+    except (ValueError, TypeError):
+        base_year = today.year
+    return html.Div([_phase_node(ph, i, _macro_state(ph, base_year, today))
+                     for i, ph in enumerate(phases)], className="gc-phase-timeline")
 
 
 def render_plan(plan):
     if not plan:
         return _empty("No plan yet — open ⚙ Plan settings above, set a goal, "
                       "and click Generate plan.")
-    macro = [_macro_chip(ph) for ph in plan.get("macro", [])]
-
+    sched = schedule.build_schedule(plan)
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
+        dcc.Store(id="plan-week-view", data=sched["current_index"]),
         html.Div(html.Span(id="plan-save-status", className="plan-save-status"),
                  className="plan-save-row"),
         html.Div(render_boards(plan), id="plan-board"),
+        section("Your week"),
+        html.Div("Drag to reschedule · Done / Skip to log. Use ‹ › to step "
+                 "through past and upcoming weeks.", className="plan-hint"),
+        _week_nav(),
         section("The bigger picture"),
-        dmc.SimpleGrid(macro, cols={"base": 2, "sm": 3, "lg": 4}, spacing="sm"),
+        _macro_timeline(plan, sched["today"]),
     ], gap="md")
 
 
@@ -501,43 +545,57 @@ def _save_days(days):
 
 
 @callback(Output("plan-board", "children", allow_duplicate=True),
+          Output("plan-week-body", "children", allow_duplicate=True),
           Output("coach-days-status", "children", allow_duplicate=True),
-          Input("coach-days-apply", "n_clicks"), State("coach-days", "value"),
+          Input("coach-days-apply", "n_clicks"),
+          State("coach-days", "value"), State("plan-week-view", "data"),
           prevent_initial_call=True)
-def _apply_days(_n, days):
+def _apply_days(_n, days, viewed):
     ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
     if not ordered:                       # fall back to the persisted selection
         ordered = plan_mod.load_prefs().get("preferred_days") or []
     plan = plan_mod.load_latest()
     if not plan or not ordered:
-        return no_update, "Pick at least one day first."
+        return no_update, no_update, "Pick at least one day first."
     plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
     plan = plan_mod.apply_preferred_days(plan, ordered)
-    return render_boards(plan), "Applied to your plan ✓"
+    return (render_boards(plan), _render_week_body(plan, viewed),
+            "Applied to your plan ✓")
 
 
-@callback(Output("plan-week-peek-out", "children"),
-          Input("plan-week-peek", "value"), prevent_initial_call=True)
-def _peek_week(val):
-    """Render a single chosen future week, read-only, under the Look-ahead select."""
-    if not val:
-        return None
+@callback(Output("plan-week-view", "data"),
+          Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
+          State("plan-week-view", "data"), prevent_initial_call=True)
+def _nav_week(_p, _n, cur):
+    """Step the viewed week back/forward, clamped to the weeks the plan covers."""
+    if not (ctx.triggered and ctx.triggered[0]["value"]):
+        raise PreventUpdate
     plan = plan_mod.load_latest()
     if not plan:
         raise PreventUpdate
     sched = schedule.build_schedule(plan)
-    wk = next((w for w in sched["weeks"] if str(w["week_index"]) == str(val)), None)
-    if not wk:
-        return None
-    return _board(wk, tag="Preview", tag_color="grape")
+    cur = sched["current_index"] if cur is None else cur
+    cur += -1 if ctx.triggered_id == "plan-week-prev" else 1
+    return max(0, min(len(sched["weeks"]) - 1, cur))
 
 
-@callback(Output("plan-board", "children"), Output("plan-save-status", "children"),
+@callback(Output("plan-week-body", "children"), Input("plan-week-view", "data"))
+def _show_week(idx):
+    plan = plan_mod.load_latest()
+    if not plan:
+        raise PreventUpdate
+    return _render_week_body(plan, idx)
+
+
+@callback(Output("plan-board", "children"),
+          Output("plan-week-body", "children", allow_duplicate=True),
+          Output("plan-save-status", "children"),
           Input("plan-dnd-store", "data"),
           Input({"type": "plan-act", "key": ALL, "act": ALL}, "n_clicks"),
-          prevent_initial_call=True)
-def _edit_plan(dnd, _clicks):
-    """Apply a drag-reschedule or a Done/Skip toggle, persist, re-render boards."""
+          State("plan-week-view", "data"), prevent_initial_call=True)
+def _edit_plan(dnd, _clicks, viewed):
+    """Apply a drag-reschedule or a Done/Skip toggle, persist, then re-render the
+    progress summary and the currently-viewed week."""
     trig = ctx.triggered_id
     if trig == "plan-dnd-store":
         if not dnd or not dnd.get("key"):
@@ -558,4 +616,4 @@ def _edit_plan(dnd, _clicks):
         raise PreventUpdate
     if plan is None:
         raise PreventUpdate
-    return render_boards(plan), status
+    return render_boards(plan), _render_week_body(plan, viewed), status
