@@ -342,8 +342,56 @@ html, body {
 .plan-hint {
   font-size: 0.82rem; color: var(--faint); margin: -4px 0 10px;
 }
-.plan-peek { margin-top: 12px; }
-.plan-peek:empty { margin-top: 0; }
+/* single-week board with prev/next arrows */
+.plan-week-nav {
+  display: flex; align-items: stretch; gap: 10px;
+}
+.plan-week-single { flex: 1 1 auto; min-width: 0; }
+.plan-nav-arrow {
+  flex: 0 0 auto; width: 42px; align-self: stretch;
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 12px;
+  font-size: 1.5rem; line-height: 1; cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.plan-nav-arrow:hover {
+  color: var(--amp); border-color: var(--amp);
+  background: rgba(255,176,46,0.05);
+}
+.plan-nav-arrow:active { transform: translateY(1px); }
+
+/* bigger-picture phase timeline */
+.gc-phase-timeline {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.gc-phase {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--panel);
+  cursor: default; transition: border-color .15s, background .15s;
+}
+.gc-phase.current {
+  border-color: var(--amp); background: rgba(255,176,46,0.05);
+  box-shadow: inset 0 0 0 1px var(--amp);
+}
+.gc-phase.past { opacity: 0.62; }
+.gc-phase-num {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.8rem;
+  background: var(--line); color: var(--muted);
+}
+.gc-phase.current .gc-phase-num { background: var(--amp); color: #0B0F14; }
+.gc-phase.past .gc-phase-num { background: rgba(70,208,138,0.18); color: #46D08A; }
+.gc-phase-name {
+  font-weight: 700; font-size: 0.82rem; color: var(--text); line-height: 1.25;
+}
+.gc-phase-weeks {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.66rem;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  margin-top: 3px;
+}
 .plan-save-status {
   font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; color: #46D08A;
 }
