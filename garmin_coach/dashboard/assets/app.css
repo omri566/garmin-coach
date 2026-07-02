@@ -342,6 +342,8 @@ html, body {
 .plan-hint {
   font-size: 0.82rem; color: var(--faint); margin: -4px 0 10px;
 }
+.plan-peek { margin-top: 12px; }
+.plan-peek:empty { margin-top: 0; }
 .plan-save-status {
   font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; color: #46D08A;
 }
