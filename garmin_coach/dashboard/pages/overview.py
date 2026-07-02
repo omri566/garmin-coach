@@ -388,7 +388,7 @@ def recovery_fig(rng="1y"):
     with a last-14-day average baseline."""
     rec = data.slice_since(data.recovery_trend(), rng, col="day")
     return figures.daily_metric(rec, "hrv_overnight", "HRV", figures.VIOLET,
-                                height=300, recent_avg=True)
+                                height=300)
 
 
 @callback(Output(fig_id("ov-recovery"), "figure"), Input("ov-rec-range", "value"))
