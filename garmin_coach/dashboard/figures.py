@@ -44,6 +44,12 @@ def _base(height: int = 320, title: str | None = None) -> go.Figure:
     return fig
 
 
+def _plotly_fmt(fmt: str) -> str:
+    """Convert a Python format spec like ``"{:.0f}"`` to the d3 spec Plotly
+    hovertemplates use (``".0f"``)."""
+    return fmt.strip("{}").lstrip(":") or ".0f"
+
+
 def _end_label(fig, df, col, color, fmt="{:.0f}", yaxis="y"):
     """Tag the last point of a series with its value, so the chart reads without
     decoding the legend."""
@@ -265,10 +271,10 @@ def gct_balance_trend(df, col: str = "avg_gct_balance",
 
 # --- recovery / health (daily) ----------------------------------------------
 def daily_metric(df, col, label, color, day="day", yrange=None, band=None,
-                 fmt="{:.0f}", height=300, recent_avg=False) -> go.Figure:
-    """Daily markers + a smooth 14-day trend for a recovery metric, with an
-    optional reference band, end-of-trend value tag, and (if ``recent_avg``) a
-    horizontal line at the last-14-day average for a baseline to read against."""
+                 fmt="{:.0f}", height=300) -> go.Figure:
+    """Two curves for a recovery metric: the raw nightly value and a smooth
+    14-day moving average to read the trend against, with an optional reference
+    band and an end-of-trend value tag."""
     fig = _base(height=height)
     if df is None or df.empty or col not in df.columns:
         return fig
@@ -278,25 +284,23 @@ def daily_metric(df, col, label, color, day="day", yrange=None, band=None,
     if band:
         fig.add_hrect(y0=band[0], y1=band[1], fillcolor=GREEN, opacity=0.08,
                       line_width=0)
-    fig.add_scatter(x=d[day], y=d[col], mode="markers", name=label,
-                    marker=dict(color=color, size=4, opacity=0.26), hoverinfo="skip")
+    # Curve 1 — the raw nightly value (faint line + small markers).
+    fig.add_scatter(x=d[day], y=d[col], mode="lines+markers", name=label,
+                    line=dict(color=color, width=1),
+                    marker=dict(color=color, size=4),
+                    opacity=0.4,
+                    hovertemplate=label + " %{y:" + _plotly_fmt(fmt) + "}<extra></extra>")
+    # Curve 2 — the 14-day moving average (bold spline).
     roll = d.set_index(day)[col].rolling("14D", min_periods=2).mean()
-    fig.add_scatter(x=roll.index, y=roll.values, name=f"{label} (trend)",
+    fig.add_scatter(x=roll.index, y=roll.values, name=f"{label} · 14-day avg",
                     line=dict(color=color, width=2.5, shape="spline", smoothing=0.5),
-                    hovertemplate=label + " %{y:.0f}<extra></extra>")
+                    hovertemplate=label + " 14-day avg %{y:" + _plotly_fmt(fmt)
+                    + "}<extra></extra>")
     rv = roll.dropna()
     if not rv.empty:
         fig.add_annotation(x=rv.index[-1], y=float(rv.iloc[-1]),
                            text=" " + fmt.format(float(rv.iloc[-1])), showarrow=False,
                            xanchor="left", font=dict(family=_MONO, size=12, color=color))
-    if recent_avg and not rv.empty:
-        avg = float(rv.iloc[-1])      # 14-day rolling at the last point = last-14d mean
-        fig.add_hline(y=avg, line=dict(color=AMP, width=1.4, dash="dash"),
-                      annotation_text=f"14-day avg · {fmt.format(avg)}",
-                      annotation_position="bottom right",
-                      annotation_font=dict(family=_MONO, size=10, color=AMP))
-        fig.add_scatter(x=[None], y=[None], mode="lines", name="14-day avg",
-                        line=dict(color=AMP, width=1.4, dash="dash"))
     if yrange:
         fig.update_yaxes(range=yrange)
     _x_rangeslider(fig)
