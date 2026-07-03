@@ -10,7 +10,8 @@ import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
+from dash import (ALL, Input, Output, State, callback, clientside_callback, ctx,
+                  dcc, html, no_update)
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
@@ -216,41 +217,41 @@ def _week_tag(wk, cur):
     return (f"In {i - cur} weeks", "grape")
 
 
-def _week_nav():
-    """Static shell: prev/next arrows around the single-week board container."""
-    return html.Div([
-        html.Button("‹", id="plan-week-prev", n_clicks=0,
-                    className="plan-nav-arrow", **{"aria-label": "Previous week"}),
-        html.Div(id="plan-week-body", className="plan-week-single"),
-        html.Button("›", id="plan-week-next", n_clicks=0,
-                    className="plan-nav-arrow", **{"aria-label": "Next week"}),
-    ], className="plan-week-nav")
-
-
-def _view(data):
-    """Unpack the plan-week-view store into (index, direction)."""
+def _view_idx(data):
+    """The viewed week index out of the plan-week-view store (dict or int)."""
     if isinstance(data, dict):
-        return data.get("idx"), data.get("dir", 0)
-    return data, 0
+        return data.get("idx")
+    return data
 
 
-def _render_week_body(plan, data, animate=True):
-    """The one navigated week, as a board (editable only for this/next week).
-
-    ``animate`` adds a directional slide-in class when the week changed via the
-    arrows; edits re-render in place with no slide so a Done toggle doesn't lurch.
-    """
+def _week_track(plan, idx):
+    """All weeks rendered side-by-side in a sliding track; the client-side arrows
+    just translate this track, so stepping weeks never round-trips to the server
+    (no loading spinner, no flash — a smooth CSS slide). Only this/next weeks are
+    editable; the rest are read-only previews."""
     sched = schedule.build_schedule(plan)
     cur = sched["current_index"]
     weeks = sched["weeks"]
-    idx, direction = _view(data)
     idx = cur if idx is None else max(0, min(len(weeks) - 1, idx))
-    wk = weeks[idx]
-    tag, color = _week_tag(wk, cur)
-    anim = ""
-    if animate and direction:
-        anim = "wk-next" if direction > 0 else "wk-prev"
-    return _board(wk, tag=tag, tag_color=color, anim=anim)
+    boards = []
+    for wk in weeks:
+        tag, color = _week_tag(wk, cur)
+        boards.append(_board(wk, tag=tag, tag_color=color))
+    return html.Div(boards, className="plan-week-track",
+                    style={"transform": f"translateX(-{idx * 100}%)"})
+
+
+def _week_nav(plan):
+    """Prev/next arrows around the sliding week carousel (rendered once)."""
+    sched = schedule.build_schedule(plan)
+    return html.Div([
+        html.Button("‹", id="plan-week-prev", n_clicks=0,
+                    className="plan-nav-arrow", **{"aria-label": "Previous week"}),
+        html.Div(_week_track(plan, sched["current_index"]),
+                 id="plan-week-body", className="plan-week-port"),
+        html.Button("›", id="plan-week-next", n_clicks=0,
+                    className="plan-nav-arrow", **{"aria-label": "Next week"}),
+    ], className="plan-week-nav")
 
 
 def _countdown(goal_date, today):
@@ -463,14 +464,16 @@ def render_plan(plan):
     sched = schedule.build_schedule(plan)
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
-        dcc.Store(id="plan-week-view", data={"idx": sched["current_index"], "dir": 0}),
+        dcc.Store(id="plan-week-view",
+                  data={"idx": sched["current_index"],
+                        "n": len(sched["weeks"]), "np": 0, "nn": 0}),
         html.Div(html.Span(id="plan-save-status", className="plan-save-status"),
                  className="plan-save-row"),
         html.Div(render_boards(plan), id="plan-board"),
         section("Your week"),
         html.Div("Drag to reschedule · Done / Skip to log. Use ‹ › to step "
                  "through past and upcoming weeks.", className="plan-hint"),
-        _week_nav(),
+        _week_nav(plan),
         section("The bigger picture"),
         _macro_timeline(plan, sched["today"]),
     ], gap="md")
@@ -579,35 +582,29 @@ def _apply_days(_n, days, viewed):
         return no_update, no_update, "Pick at least one day first."
     plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
     plan = plan_mod.apply_preferred_days(plan, ordered)
-    return (render_boards(plan), _render_week_body(plan, viewed, animate=False),
+    return (render_boards(plan), _week_track(plan, _view_idx(viewed)),
             "Applied to your plan ✓")
 
 
-@callback(Output("plan-week-view", "data"),
-          Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
-          State("plan-week-view", "data"), prevent_initial_call=True)
-def _nav_week(_p, _n, data):
-    """Step the viewed week back/forward, clamped to the weeks the plan covers.
-    Records the direction so the board can slide in the matching way."""
-    if not (ctx.triggered and ctx.triggered[0]["value"]):
-        raise PreventUpdate
-    plan = plan_mod.load_latest()
-    if not plan:
-        raise PreventUpdate
-    sched = schedule.build_schedule(plan)
-    idx, _ = _view(data)
-    idx = sched["current_index"] if idx is None else idx
-    direction = -1 if ctx.triggered_id == "plan-week-prev" else 1
-    idx = max(0, min(len(sched["weeks"]) - 1, idx + direction))
-    return {"idx": idx, "dir": direction}
-
-
-@callback(Output("plan-week-body", "children"), Input("plan-week-view", "data"))
-def _show_week(data):
-    plan = plan_mod.load_latest()
-    if not plan:
-        raise PreventUpdate
-    return _render_week_body(plan, data, animate=True)
+# Week stepping is done entirely in the browser: the arrows just slide the
+# pre-rendered carousel (no server round-trip → no loading spinner / flash). The
+# store keeps the viewed index + last-seen click counts so server re-renders
+# (edits, apply-days) can re-position the track to the same week.
+clientside_callback(
+    """
+    function(prevN, nextN, data){
+        data = data || {idx:0, n:1, np:0, nn:0};
+        var idx = data.idx|0, n = (data.n|0) || 1, np = data.np|0, nn = data.nn|0;
+        if ((prevN||0) > np) idx = Math.max(0, idx - 1);
+        else if ((nextN||0) > nn) idx = Math.min(n - 1, idx + 1);
+        var track = document.querySelector('#plan-week-body .plan-week-track');
+        if (track) track.style.transform = 'translateX(' + (-idx * 100) + '%)';
+        return {idx: idx, n: n, np: (prevN||0), nn: (nextN||0)};
+    }
+    """,
+    Output("plan-week-view", "data"),
+    Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
+    State("plan-week-view", "data"), prevent_initial_call=True)
 
 
 @callback(Output("plan-board", "children"),
@@ -639,5 +636,4 @@ def _edit_plan(dnd, _clicks, viewed):
         raise PreventUpdate
     if plan is None:
         raise PreventUpdate
-    return (render_boards(plan), _render_week_body(plan, viewed, animate=False),
-            status)
+    return render_boards(plan), _week_track(plan, _view_idx(viewed)), status
