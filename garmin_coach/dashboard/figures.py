@@ -212,7 +212,7 @@ def line_trend(df, col: str, label: str, color: str = TEAL,
         fig.add_hrect(y0=band[0], y1=band[1], fillcolor=GREEN, opacity=0.08,
                       line_width=0)
     fig.add_scatter(x=df[xcol], y=df[col], mode="markers", name=label,
-                    marker=dict(color=color, size=4, opacity=0.35),
+                    marker=dict(color=color, size=5, opacity=0.55),
                     hoverinfo="skip")
     if "rolling" in df.columns:
         fig.add_scatter(x=df[xcol], y=df["rolling"], name=f"{label} (trend)",
