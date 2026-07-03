@@ -77,16 +77,21 @@ def technique_trends(window: int = 42) -> dict[str, pd.DataFrame]:
     }
 
 
-def vo2max_trend() -> pd.DataFrame:
+def vo2max_trend(window: int = 42) -> pd.DataFrame:
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT start_time, vo2max FROM activities "
             "WHERE vo2max IS NOT NULL ORDER BY start_time"
         ).fetchall()
     df = pd.DataFrame([dict(r) for r in rows])
-    if not df.empty:
-        df["date"] = pd.to_datetime(df["start_time"])
-    return df
+    if df.empty:
+        return df
+    df["date"] = pd.to_datetime(df["start_time"])
+    # A rolling mean gives line_trend a connecting trend line (VO₂max is a slow-
+    # moving estimate, so the raw points alone read as scattered dots).
+    df = df.dropna(subset=["vo2max"]).set_index("date").sort_index()
+    df["rolling"] = df["vo2max"].rolling(f"{window}D", min_periods=2).mean()
+    return df.reset_index()[["date", "vo2max", "rolling"]]
 
 
 def zone_distribution(weeks: int = 12) -> pd.DataFrame:
