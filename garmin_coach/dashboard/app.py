@@ -17,10 +17,17 @@ from dash import (ALL, Input, Output, State, _dash_renderer, callback, ctx, dcc,
                   html)
 from dash.exceptions import PreventUpdate
 
+from garmin_coach import config
 from garmin_coach.dashboard import figures, ui
 from garmin_coach.dashboard.pages import analysis, coach, onboarding, overview
 from garmin_coach.setup import state as setup_state
 from garmin_coach.store import db
+
+# Guarantee the data dir + an initialised schema exist before any layout queries,
+# so a brand-new user (or one whose first sync failed) gets an empty dashboard
+# instead of a "no such table" crash / "Error loading layout".
+config.ensure_dirs()
+db.init_db()
 
 _dash_renderer._set_react_version("18.2.0")
 
@@ -91,10 +98,33 @@ def _shell_inner():
         )
 
 
+def _error_panel(tb: str):
+    return html.Div(style={"maxWidth": "620px", "margin": "60px auto",
+                           "padding": "0 20px", "color": "#E8EDF3"}, children=[
+        dmc.Text("Something went wrong loading your dashboard", fw=700, size="lg"),
+        dmc.Text("Your data is safe. Try ‘↻ Sync now’ after reopening, or reopen "
+                 "the app. If it keeps happening, send this file to support:",
+                 c="dimmed", size="sm", mt=8),
+        dmc.Code(str(config.DATA_DIR / "last_error.log"), mt=8),
+        dmc.Text(tb[-600:], size="xs", c="dimmed", mt=12,
+                 style={"whiteSpace": "pre-wrap", "fontFamily": "monospace"}),
+    ])
+
+
 def layout():
     """Onboarding on first run (until Garmin + Claude are connected), then the
     dashboard on every launch after that."""
-    inner = _shell_inner() if setup_state.is_configured() else onboarding.layout()
+    try:
+        inner = (_shell_inner() if setup_state.is_configured()
+                 else onboarding.layout())
+    except Exception:
+        import traceback
+        tb = traceback.format_exc()
+        try:
+            (config.DATA_DIR / "last_error.log").write_text(tb)
+        except OSError:
+            pass
+        inner = _error_panel(tb)
     return dmc.MantineProvider(forceColorScheme="dark", theme=THEME, children=inner)
 
 
