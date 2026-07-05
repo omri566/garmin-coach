@@ -10,8 +10,8 @@ import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import (ALL, Input, Output, State, callback, clientside_callback, ctx,
-                  dcc, html, no_update)
+from dash import (ALL, ClientsideFunction, Input, Output, State, callback,
+                  clientside_callback, ctx, dcc, html, no_update)
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
@@ -605,17 +605,9 @@ def _apply_days(_n, days, viewed):
 
 # Arrow nav is entirely client-side: slide the pre-rendered carousel (transform)
 # and size the viewport to the active week — no server round-trip, so it's smooth.
+# (Functions live in assets/plan_carousel.js under the gcplan namespace.)
 clientside_callback(
-    """
-    function(prevN, nextN, data){
-        data = data || {idx:0, n:1, np:0, nn:0};
-        var idx = data.idx|0, n = (data.n|0)||1, np = data.np|0, nn = data.nn|0;
-        if ((prevN||0) > np) idx = Math.max(0, idx - 1);
-        else if ((nextN||0) > nn) idx = Math.min(n - 1, idx + 1);
-        if (window.gcApplyWeek) window.gcApplyWeek(idx);
-        return {idx: idx, n: n, np: (prevN||0), nn: (nextN||0)};
-    }
-    """,
+    ClientsideFunction(namespace="gcplan", function_name="nav"),
     Output("plan-week-view", "data"),
     Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
     State("plan-week-view", "data"), prevent_initial_call=True)
@@ -623,15 +615,7 @@ clientside_callback(
 # Re-apply position + height after the track is (re-)rendered: initial load and
 # after an edit re-renders the carousel.
 clientside_callback(
-    """
-    function(children, data){
-        var idx = (data && data.idx) ? data.idx : 0;
-        requestAnimationFrame(function(){ requestAnimationFrame(function(){
-            if (window.gcApplyWeek) window.gcApplyWeek(idx);
-        });});
-        return window.dash_clientside.no_update;
-    }
-    """,
+    ClientsideFunction(namespace="gcplan", function_name="reapply"),
     Output("plan-anim-dummy", "data"),
     Input("plan-week-body", "children"),
     State("plan-week-view", "data"))
@@ -640,18 +624,7 @@ clientside_callback(
 # the viewport height can't be measured until then. Re-apply once the tab's own
 # style flips to visible (this fires after the show, unlike the tab value).
 clientside_callback(
-    """
-    function(style, data){
-        var hidden = style && style.display === "none";
-        if (!hidden){
-            var idx = (data && data.idx) ? data.idx : 0;
-            requestAnimationFrame(function(){ requestAnimationFrame(function(){
-                if (window.gcApplyWeek) window.gcApplyWeek(idx);
-            });});
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
+    ClientsideFunction(namespace="gcplan", function_name="onTab"),
     Output("plan-anim-dummy", "data", allow_duplicate=True),
     Input("tab-coach", "style"),
     State("plan-week-view", "data"), prevent_initial_call=True)
