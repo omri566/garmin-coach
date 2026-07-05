@@ -5,3 +5,6 @@ __pycache__/
 .env
 .DS_Store
 .lavish/
+build/
+dist/
+*.zip

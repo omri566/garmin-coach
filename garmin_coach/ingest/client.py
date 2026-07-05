@@ -34,10 +34,17 @@ def get_client() -> Garmin:
     config.ensure_dirs()
     tokenstore = str(config.TOKENS_DIR)
 
-    email = config.GARMIN_EMAIL or input("Garmin email: ").strip()
-    password = config.GARMIN_PASSWORD or getpass.getpass("Garmin password: ")
+    # A cached token means we're already authenticated (e.g. after the onboarding
+    # login) — login(tokenstore) reuses it with no SSO call, so we must NOT prompt
+    # for credentials here: the packaged .app has no stdin and input() would crash.
+    tp = config.TOKENS_DIR
+    has_token = tp.exists() and any(tp.iterdir())
+    email, password = config.GARMIN_EMAIL, config.GARMIN_PASSWORD
+    if not has_token:
+        email = email or input("Garmin email: ").strip()
+        password = password or getpass.getpass("Garmin password: ")
 
-    client = Garmin(email=email, password=password, prompt_mfa=_prompt_mfa)
+    client = Garmin(email=email or "", password=password or "", prompt_mfa=_prompt_mfa)
     try:
         client.login(tokenstore)
     except GarminConnectTooManyRequestsError as exc:

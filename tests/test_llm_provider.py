@@ -65,8 +65,10 @@ def test_generate_returns_envelope_result(monkeypatch):
     monkeypatch.setattr(provider.subprocess, "run", fake)
     out = ClaudeCodeProvider().generate("hi")
     assert out == "hello world"
-    # Sanity: it shelled out to the configured binary in headless print mode.
-    assert fake.captured["cmd"][:3] == ["claude", "-p", "--output-format"]
+    # Sanity: it shelled out to the resolved claude binary in headless print mode.
+    cmd = fake.captured["cmd"]
+    assert cmd[0].split("/")[-1] == "claude"
+    assert cmd[1:3] == ["-p", "--output-format"]
     assert fake.captured["input"] == "hi"
 
 

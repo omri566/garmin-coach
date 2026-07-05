@@ -69,7 +69,12 @@ class LLMProvider(ABC):
 class ClaudeCodeProvider(LLMProvider):
     """Runs the local `claude` CLI in headless print mode."""
 
-    def __init__(self, binary: str = "claude", default_model: str | None = None):
+    def __init__(self, binary: str | None = None, default_model: str | None = None):
+        # Resolve the real binary path — a Finder-launched .app has a minimal PATH
+        # that usually omits Homebrew/npm, so plain "claude" wouldn't be found.
+        if not binary:
+            from garmin_coach.setup import claude_auth
+            binary = claude_auth.find_claude() or "claude"
         self.binary = binary
         self.default_model = default_model
 
