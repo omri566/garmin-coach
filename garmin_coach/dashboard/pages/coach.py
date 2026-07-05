@@ -275,11 +275,25 @@ def _ring(pct, color, caption):
     ], className="gc-ring")
 
 
+def _total_plan_weeks(plan):
+    """Highest week number across the macro phases (the full plan length), e.g.
+    'weeks 13-15' / 'weeks 16' → 16. 0 if the macro can't be parsed."""
+    total = 0
+    for ph in plan.get("macro", []):
+        nums = re.findall(r"\d+", ph.get("weeks", "").split("(")[0])
+        if nums:
+            total = max(total, int(nums[-1]))
+    return total
+
+
 def _progress_hero(plan, sched, streak):
     weeks, cur, today = sched["weeks"], sched["current_index"], sched["today"]
-    done = sum(w["done"] for w in weeks)
-    total = sum(w["total"] for w in weeks)
-    pct = round(100 * done / total) if total else 0
+    # "Plan complete" spans the whole macro plan (e.g. 16 weeks), not just the few
+    # detailed next_month weeks — measured by weeks elapsed since the plan began.
+    total_weeks = _total_plan_weeks(plan) or len(weeks)
+    plan_start = weeks[0]["start"] if weeks else today
+    weeks_done = max(0, min(total_weeks, (today - plan_start).days // 7))
+    pct = round(100 * weeks_done / total_weeks) if total_weeks else 0
     this = weeks[cur] if weeks else None
     tdone, ttotal = (this["done"], this["total"]) if this else (0, 0)
     if ttotal and tdone >= ttotal:
@@ -381,7 +395,10 @@ def render_boards(plan):
     navigated separately via the prev/next controls, so only this part is
     re-rendered when overall progress changes."""
     sched = schedule.build_schedule(plan)
-    streak = data.running_streak_weeks(sched["today"])
+    # Streak reflects consistency within this plan (weeks before it started don't
+    # count), so it lines up with plan progress instead of lifetime running.
+    plan_start = sched["weeks"][0]["start"] if sched["weeks"] else None
+    streak = data.running_streak_weeks(sched["today"], since=plan_start)
     return [
         _progress_hero(plan, sched, streak),
         _today_card(sched),

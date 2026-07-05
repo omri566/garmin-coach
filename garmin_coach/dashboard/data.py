@@ -114,18 +114,25 @@ def _running_run_dates() -> list[dt.date]:
     return out
 
 
-def running_streak_weeks(today: dt.date | None = None) -> int:
-    """Consecutive Sun–Sat weeks (up to now) with at least one run."""
+def running_streak_weeks(today: dt.date | None = None,
+                         since: dt.date | None = None) -> int:
+    """Consecutive Sun–Sat weeks (up to now) with at least one run.
+
+    ``since`` bounds the count to weeks on/after that date's week — used in the
+    plan hero so the streak reflects consistency *within this plan*, not running
+    weeks that predate it.
+    """
     from garmin_coach.coach.schedule import _week_start
     today = today or dt.date.today()
     weeks = {_week_start(d) for d in _running_run_dates()}
     if not weeks:
         return 0
+    since_week = _week_start(since) if since else None
     cur = _week_start(today)
     if cur not in weeks:            # this week not started yet → don't break streak
         cur -= dt.timedelta(days=7)
     n = 0
-    while cur in weeks:
+    while cur in weeks and (since_week is None or cur >= since_week):
         n += 1
         cur -= dt.timedelta(days=7)
     return n
