@@ -10,7 +10,8 @@ import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
+from dash import (ALL, Input, Output, State, callback, clientside_callback, ctx,
+                  dcc, html, no_update)
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
@@ -216,36 +217,39 @@ def _week_tag(wk, cur):
     return (f"In {i - cur} weeks", "grape")
 
 
-def _view(data):
-    """Unpack the plan-week-view store into (index, direction)."""
-    if isinstance(data, dict):
-        return data.get("idx"), data.get("dir", 0)
-    return data, 0
+def _view_idx(data):
+    """The viewed week index from the plan-week-view store (dict or int)."""
+    return data.get("idx") if isinstance(data, dict) else data
 
 
-def _week_nav():
-    """Prev/next arrows around the single viewed-week board container."""
-    return html.Div([
-        html.Button("‹", id="plan-week-prev", n_clicks=0,
-                    className="plan-nav-arrow", **{"aria-label": "Previous week"}),
-        html.Div(id="plan-week-body", className="plan-week-single"),
-        html.Button("›", id="plan-week-next", n_clicks=0,
-                    className="plan-nav-arrow", **{"aria-label": "Next week"}),
-    ], className="plan-week-nav")
-
-
-def _render_week_body(plan, data, animate=True):
-    """The one viewed week as a board. ``animate`` adds a directional slide-in
-    when stepping via the arrows; edits re-render in place with no slide."""
+def _week_track(plan, idx):
+    """All weeks rendered side-by-side as slides; the client-side arrows slide the
+    track (a CSS transform) with no server round-trip, and JS sizes the viewport
+    to the active week — a smooth transition with no flash / empty space."""
     sched = schedule.build_schedule(plan)
     cur = sched["current_index"]
     weeks = sched["weeks"]
-    idx, direction = _view(data)
     idx = cur if idx is None else max(0, min(len(weeks) - 1, idx))
-    wk = weeks[idx]
-    tag, color = _week_tag(wk, cur)
-    anim = ("wk-next" if direction > 0 else "wk-prev") if (animate and direction) else ""
-    return _board(wk, tag=tag, tag_color=color, anim=anim)
+    slides = []
+    for wk in weeks:
+        tag, color = _week_tag(wk, cur)
+        slides.append(html.Div(_board(wk, tag=tag, tag_color=color),
+                               className="plan-week-slide"))
+    return html.Div(slides, id="plan-week-track", className="plan-week-track",
+                    style={"transform": f"translateX(-{idx * 100}%)"})
+
+
+def _week_nav(plan):
+    """Prev/next arrows around the sliding week carousel (rendered once)."""
+    sched = schedule.build_schedule(plan)
+    return html.Div([
+        html.Button("‹", id="plan-week-prev", n_clicks=0,
+                    className="plan-nav-arrow", **{"aria-label": "Previous week"}),
+        html.Div(_week_track(plan, sched["current_index"]),
+                 id="plan-week-body", className="plan-week-port"),
+        html.Button("›", id="plan-week-next", n_clicks=0,
+                    className="plan-nav-arrow", **{"aria-label": "Next week"}),
+    ], className="plan-week-nav")
 
 
 def _countdown(goal_date, today):
@@ -475,14 +479,17 @@ def render_plan(plan):
     sched = schedule.build_schedule(plan)
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
-        dcc.Store(id="plan-week-view", data={"idx": sched["current_index"], "dir": 0}),
+        dcc.Store(id="plan-week-view",
+                  data={"idx": sched["current_index"],
+                        "n": len(sched["weeks"]), "np": 0, "nn": 0}),
+        dcc.Store(id="plan-anim-dummy"),
         html.Div(html.Span(id="plan-save-status", className="plan-save-status"),
                  className="plan-save-row"),
         html.Div(render_boards(plan), id="plan-board"),
         section("Your week"),
         html.Div("Drag to reschedule · Done / Skip to log. Use ‹ › to step "
                  "through past and upcoming weeks.", className="plan-hint"),
-        _week_nav(),
+        _week_nav(plan),
         section("The bigger picture"),
         _macro_timeline(plan, sched["today"]),
     ], gap="md")
@@ -592,34 +599,62 @@ def _apply_days(_n, days, viewed):
         return no_update, no_update, "Pick at least one day first."
     plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
     plan = plan_mod.apply_preferred_days(plan, ordered)
-    return (render_boards(plan), _render_week_body(plan, viewed, animate=False),
+    return (render_boards(plan), _week_track(plan, _view_idx(viewed)),
             "Applied to your plan ✓")
 
 
-@callback(Output("plan-week-view", "data"),
-          Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
-          State("plan-week-view", "data"), prevent_initial_call=True)
-def _nav_week(_p, _n, data):
-    """Step the viewed week, clamped, recording the direction for the slide-in."""
-    if not (ctx.triggered and ctx.triggered[0]["value"]):
-        raise PreventUpdate
-    plan = plan_mod.load_latest()
-    if not plan:
-        raise PreventUpdate
-    sched = schedule.build_schedule(plan)
-    idx, _ = _view(data)
-    idx = sched["current_index"] if idx is None else idx
-    direction = -1 if ctx.triggered_id == "plan-week-prev" else 1
-    idx = max(0, min(len(sched["weeks"]) - 1, idx + direction))
-    return {"idx": idx, "dir": direction}
+# Arrow nav is entirely client-side: slide the pre-rendered carousel (transform)
+# and size the viewport to the active week — no server round-trip, so it's smooth.
+clientside_callback(
+    """
+    function(prevN, nextN, data){
+        data = data || {idx:0, n:1, np:0, nn:0};
+        var idx = data.idx|0, n = (data.n|0)||1, np = data.np|0, nn = data.nn|0;
+        if ((prevN||0) > np) idx = Math.max(0, idx - 1);
+        else if ((nextN||0) > nn) idx = Math.min(n - 1, idx + 1);
+        if (window.gcApplyWeek) window.gcApplyWeek(idx);
+        return {idx: idx, n: n, np: (prevN||0), nn: (nextN||0)};
+    }
+    """,
+    Output("plan-week-view", "data"),
+    Input("plan-week-prev", "n_clicks"), Input("plan-week-next", "n_clicks"),
+    State("plan-week-view", "data"), prevent_initial_call=True)
 
+# Re-apply position + height after the track is (re-)rendered: initial load and
+# after an edit re-renders the carousel.
+clientside_callback(
+    """
+    function(children, data){
+        var idx = (data && data.idx) ? data.idx : 0;
+        requestAnimationFrame(function(){ requestAnimationFrame(function(){
+            if (window.gcApplyWeek) window.gcApplyWeek(idx);
+        });});
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("plan-anim-dummy", "data"),
+    Input("plan-week-body", "children"),
+    State("plan-week-view", "data"))
 
-@callback(Output("plan-week-body", "children"), Input("plan-week-view", "data"))
-def _show_week(data):
-    plan = plan_mod.load_latest()
-    if not plan:
-        raise PreventUpdate
-    return _render_week_body(plan, data, animate=True)
+# The carousel lives on the Coach tab, which is display:none until selected — so
+# the viewport height can't be measured until then. Re-apply once the tab's own
+# style flips to visible (this fires after the show, unlike the tab value).
+clientside_callback(
+    """
+    function(style, data){
+        var hidden = style && style.display === "none";
+        if (!hidden){
+            var idx = (data && data.idx) ? data.idx : 0;
+            requestAnimationFrame(function(){ requestAnimationFrame(function(){
+                if (window.gcApplyWeek) window.gcApplyWeek(idx);
+            });});
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("plan-anim-dummy", "data", allow_duplicate=True),
+    Input("tab-coach", "style"),
+    State("plan-week-view", "data"), prevent_initial_call=True)
 
 
 @callback(Output("plan-board", "children"),
@@ -651,5 +686,4 @@ def _edit_plan(dnd, _clicks, viewed):
         raise PreventUpdate
     if plan is None:
         raise PreventUpdate
-    return (render_boards(plan), _render_week_body(plan, viewed, animate=False),
-            status)
+    return render_boards(plan), _week_track(plan, _view_idx(viewed)), status
