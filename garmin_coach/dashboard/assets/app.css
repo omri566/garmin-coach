@@ -342,11 +342,23 @@ html, body {
 .plan-hint {
   font-size: 0.82rem; color: var(--faint); margin: -4px 0 10px;
 }
-/* single-week board with floating circular prev/next arrows (Option A) */
+/* single-week carousel with floating circular prev/next arrows */
 .plan-week-nav {
-  display: flex; align-items: stretch; gap: 12px;
+  display: flex; align-items: center; gap: 12px;
 }
-.plan-week-single { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+/* viewport: clips to one week; JS animates its height to the active week */
+.plan-week-port {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  transition: height .32s cubic-bezier(.2,.7,.3,1);
+}
+.plan-week-track {
+  display: flex; align-items: flex-start;
+  transition: transform .32s cubic-bezier(.2,.7,.3,1);
+}
+.plan-week-track > .plan-week-slide { flex: 0 0 100%; min-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .plan-week-port, .plan-week-track { transition: none; }
+}
 .plan-nav-arrow {
   flex: 0 0 auto; align-self: center; width: 38px; height: 38px; border-radius: 50%;
   background: var(--panel-2); color: var(--muted);
@@ -359,17 +371,6 @@ html, body {
   color: var(--amp); border-color: var(--amp); background: rgba(255,176,46,0.06);
 }
 .plan-nav-arrow:active { transform: scale(.92); }
-
-/* directional slide-in when stepping weeks (board is re-rendered on nav) */
-@keyframes wkInRight { from { opacity: 0; transform: translateX(26px); }
-                       to   { opacity: 1; transform: none; } }
-@keyframes wkInLeft  { from { opacity: 0; transform: translateX(-26px); }
-                       to   { opacity: 1; transform: none; } }
-.plan-board-week.wk-next { animation: wkInRight .28s cubic-bezier(.2,.7,.3,1); }
-.plan-board-week.wk-prev { animation: wkInLeft  .28s cubic-bezier(.2,.7,.3,1); }
-@media (prefers-reduced-motion: reduce) {
-  .plan-board-week.wk-next, .plan-board-week.wk-prev { animation: none; }
-}
 
 /* bigger-picture: sleek accent cards (Option 3).
    Flexbox (not auto-fit grid, which distributes unevenly at wide widths): every
