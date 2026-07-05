@@ -18,7 +18,8 @@ from dash import (ALL, Input, Output, State, _dash_renderer, callback, ctx, dcc,
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.dashboard import figures, ui
-from garmin_coach.dashboard.pages import analysis, coach, overview
+from garmin_coach.dashboard.pages import analysis, coach, onboarding, overview
+from garmin_coach.setup import state as setup_state
 from garmin_coach.store import db
 
 _dash_renderer._set_react_version("18.2.0")
@@ -54,10 +55,8 @@ _SHOW: dict = {}
 _HIDE = {"display": "none"}
 
 
-def shell():
-    return dmc.MantineProvider(
-        forceColorScheme="dark", theme=THEME,
-        children=html.Div(
+def _shell_inner():
+    return html.Div(
             style={"backgroundColor": figures.BG, "minHeight": "100vh",
                    "paddingBottom": "3rem"},
             children=html.Div(className="gc-shell", children=[
@@ -89,8 +88,14 @@ def shell():
                 html.Div(coach.layout(), id="tab-coach", style=_HIDE),
                 _chart_modal(),
             ]),
-        ),
-    )
+        )
+
+
+def layout():
+    """Onboarding on first run (until Garmin + Claude are connected), then the
+    dashboard on every launch after that."""
+    inner = _shell_inner() if setup_state.is_configured() else onboarding.layout()
+    return dmc.MantineProvider(forceColorScheme="dark", theme=THEME, children=inner)
 
 
 # Global "enlarge any chart" overlay — opened by any panel's ⤢ button.
@@ -183,7 +188,7 @@ def sync_now(_n):
     return overview.layout(), html.Span(f"{head} · {freshness}", className="ok")
 
 
-app.layout = shell
+app.layout = layout
 
 if __name__ == "__main__":
     # threaded so a slow LLM callback doesn't block the whole UI.
