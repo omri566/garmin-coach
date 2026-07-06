@@ -227,6 +227,12 @@ html, body {
 
 /* watch-outs — compact pills (topic only), detail on hover */
 .gc-watch-chip { cursor: default; text-transform: none !important; font-weight: 600; }
+
+/* personal-insight cards — one glanceable stat each */
+.gc-insight-ic {
+  font-size: 1.05rem; line-height: 1; flex: none;
+  filter: saturate(1.1);
+}
 .gc-flags {
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 10px; padding: 14px 16px; margin-top: 16px;
