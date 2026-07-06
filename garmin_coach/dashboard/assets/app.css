@@ -216,9 +216,17 @@ html, body {
   background: var(--panel-2) !important; border: 1px solid var(--line) !important;
   border-radius: 12px !important;
 }
-.gc-assessment { font-size: 0.98rem; line-height: 1.7; color: var(--text); max-width: 80ch; }
+/* lead with one scannable sentence; full assessment is one tap away */
+.gc-assessment-lead {
+  font-size: 1.02rem; line-height: 1.55; color: var(--text); max-width: 80ch;
+}
+.gc-assessment {
+  font-size: 0.92rem; line-height: 1.65; color: var(--muted); max-width: 80ch;
+  margin-top: 6px;
+}
 
-/* flags — clean inset list, topic bolded then detail */
+/* watch-outs — compact pills (topic only), detail on hover */
+.gc-watch-chip { cursor: default; text-transform: none !important; font-weight: 600; }
 .gc-flags {
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 10px; padding: 14px 16px; margin-top: 16px;
