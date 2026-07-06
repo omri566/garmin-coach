@@ -23,7 +23,7 @@ from garmin_coach.knowledge import kb
 
 PRIORITY_COLOR = {"high": "red", "medium": "orange", "low": "gray"}
 PRIORITY_HEX = {"high": figures.RED, "medium": figures.ORANGE, "low": figures.MUTED}
-PRIORITY_LABEL = {"high": "Do first", "medium": "Soon", "low": "When you can"}
+PRIORITY_LABEL = {"high": "Do first", "medium": "Soon", "low": "Optional"}
 _DAYS_SUN_FIRST = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
@@ -65,20 +65,43 @@ def _flag_row(text):
     ], className="gc-flag")
 
 
+def _short_title(title: str) -> str:
+    """Lead with the concrete gist; the '— reason' / '(detail)' tail is repeated
+    in the expanded rationale, so drop it from the scannable one-line title."""
+    lead = re.split(r"\s[—–-]\s|\s*\(", title, maxsplit=1)[0].strip()
+    return lead or title
+
+
+def _watchout_chips(flags):
+    """Watch-outs as compact pills (topic only); the detail shows on hover, so the
+    section reads at a glance instead of as five dense sentences."""
+    chips = []
+    for f in flags:
+        lead, rest = _flag_parts(f)
+        chip = dmc.Badge("⚠ " + lead, color="orange", variant="light", size="sm",
+                         className="gc-watch-chip")
+        chips.append(dmc.Tooltip(chip, label=rest, multiline=True, w=300,
+                                 withArrow=True, openDelay=120, position="top")
+                     if rest else chip)
+    return dmc.Group(chips, gap="xs")
+
+
 def render_recs(rec):
     if not rec:
         return _empty("No recommendations yet — click “Refresh recommendations”.")
     items = []
     for i, r in enumerate(rec.get("recommendations", [])):
         accent = PRIORITY_HEX.get(r["priority"], figures.MUTED)
+        # Collapsed row: priority · when · short title — one scannable line.
         control = dmc.AccordionControl(dmc.Group([
             dmc.Badge(PRIORITY_LABEL.get(r["priority"], r["priority"]),
                       color=PRIORITY_COLOR.get(r["priority"], "gray"),
                       variant="light", size="sm", w=92),
-            dmc.Text(r["title"], fw=600, size="sm"),
+            dmc.Text(_short_title(r["title"]), fw=600, size="sm", lineClamp=1),
             dmc.Badge(r["horizon"].replace("_", " "), variant="outline",
                       color="gray", size="xs"),
         ], gap="sm", align="center", wrap="nowrap"))
+        # Expanded: the one action first (inverted pyramid), then why, then cites.
         panel = dmc.AccordionPanel(dmc.Stack([
             dmc.Text(r["action"], className="gc-rec-action",
                      style={"color": accent}),
@@ -92,22 +115,28 @@ def render_recs(rec):
     actions = html.Div(
         dmc.Accordion(items, multiple=True, chevronPosition="right", variant="filled"),
         className="gc-recs")
-    flags = rec.get("flags", [])
+
+    # Assessment: lead with the first sentence only; the rest is one tap away.
+    text = (rec.get("assessment", "") or "").strip()
+    bits = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)
+    headline, rest = (bits[0] if bits else text), (bits[1] if len(bits) > 1 else "")
     head = [
         dmc.Group([
             dmc.Text("How you're doing", fw=700, size="md"),
             dmc.Text(f"updated {rec.get('generated_at','')[:10]}",
                      size="xs", c="dimmed", className="mono"),
         ], justify="space-between"),
-        dmc.Spoiler(
-            showLabel="Read more", hideLabel="Show less", maxHeight=80,
-            children=html.Div(rec.get("assessment", ""), className="gc-assessment"),
-            mt=10),
+        dmc.Text(headline, className="gc-assessment-lead", mt=8),
     ]
+    if rest:
+        head.append(dmc.Spoiler(
+            showLabel="Read full assessment", hideLabel="Show less", maxHeight=0,
+            children=dmc.Text(rest, className="gc-assessment"), mt=2))
+    flags = rec.get("flags", [])
     if flags:
         head.append(html.Div([
             html.Div("Watch-outs", className="gc-flags-lab"),
-            *[_flag_row(f) for f in flags],
+            _watchout_chips(flags),
         ], className="gc-flags"))
     return dmc.Stack([
         dmc.Card(head, className="gc-console", p="lg"),
