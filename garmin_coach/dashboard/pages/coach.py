@@ -86,9 +86,33 @@ def _watchout_chips(flags):
     return dmc.Group(chips, gap="xs")
 
 
+_INSIGHT_ICON = {"time_of_day": "🕑", "late_sleep": "😴", "sleep_perf": "😴"}
+
+
+def _insights_blocks():
+    """A scannable 'what your data shows' section, or [] if no pattern is strong
+    enough — every insight is derived from the athlete's own numbers."""
+    try:
+        insights = data.personal_insights()
+    except Exception:  # noqa: BLE001 — insights are a nicety, never break the tab
+        insights = []
+    if not insights:
+        return []
+    cards = [dmc.Card([
+        dmc.Group([html.Span(_INSIGHT_ICON.get(ins["kind"], "📈"),
+                             className="gc-insight-ic"),
+                   dmc.Text(ins["title"], fw=700, size="sm")], gap="sm", wrap="nowrap"),
+        dmc.Text(ins["detail"], size="sm", c="dimmed", style={"lineHeight": 1.5}),
+    ], className="gc-card", radius="md", p="md") for ins in insights]
+    return [section("What your data shows about you"),
+            dmc.SimpleGrid(cards, cols={"base": 1, "md": 2}, spacing="md")]
+
+
 def render_recs(rec):
+    insights = _insights_blocks()
     if not rec:
-        return _empty("No recommendations yet — click “Refresh recommendations”.")
+        empty = _empty("No recommendations yet — click “Refresh recommendations”.")
+        return dmc.Stack([*insights, empty], gap="md") if insights else empty
     items = []
     for i, r in enumerate(rec.get("recommendations", [])):
         accent = PRIORITY_HEX.get(r["priority"], figures.MUTED)
@@ -140,6 +164,7 @@ def render_recs(rec):
         ], className="gc-flags"))
     return dmc.Stack([
         dmc.Card(head, className="gc-console", p="lg"),
+        *insights,
         section("Your focus right now"),
         actions,
     ], gap="md")

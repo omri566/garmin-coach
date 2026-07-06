@@ -98,6 +98,13 @@ def recovery_trend():
     return trends.recovery_trend()
 
 
+def personal_insights():
+    """Data-driven patterns from the athlete's own history (only the ones that
+    clear a significance bar). See analytics.patterns."""
+    from garmin_coach.analytics import patterns
+    return patterns.personal_insights()
+
+
 # --- motivation / progression metrics for the Coach tab ---------------------
 def _running_run_dates() -> list[dt.date]:
     with db.connect() as conn:

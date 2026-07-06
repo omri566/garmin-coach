@@ -65,6 +65,9 @@ The suite covers the pure-function core:
   and `build_schedule` status logic + Sunday→Saturday date anchoring.
 - `test_llm_provider.py` — LLM JSON extraction (`llm/provider.py`) and
   `ClaudeCodeProvider` with the `claude` CLI subprocess mocked.
+- `test_patterns.py` — personal-pattern detection (`analytics/patterns.py`):
+  evidence-gated insights (e.g. time-of-day EF edge) surfaced only when the
+  athlete's own data clears the sample-size + effect-size bar.
 - `test_figures_dates.py`, `test_schedule_matching.py` — dashboard date-axis and
   run-matching regressions (see the sections above).
 
