@@ -79,13 +79,13 @@ def time_of_day_insight(runs: pd.DataFrame) -> dict | None:
     dec_best, dec_rest = g.loc[best, "decoup"], d[d["bucket"] != best]["decoupling_pct"].mean()
     dec_note = ""
     if pd.notna(dec_best) and pd.notna(dec_rest) and dec_best < dec_rest - 1:
-        dec_note = f" and hold pace better ({dec_best:.0f}% vs {dec_rest:.0f}% decoupling)"
+        dec_note = " and you hold pace better through the run"
     return {
         "kind": "time_of_day",
-        "title": f"You run best in the {best}",
-        "detail": (f"Your {_BUCKET_LABEL[best]} runs are {lift * 100:.0f}% more "
-                   f"efficient (EF {g.loc[best, 'ef']:.2f} vs {rest:.2f}){dec_note}. "
-                   f"Put key sessions there when you can."),
+        "title": f"Run your key sessions in the {best}",
+        "detail": (f"That's when you're at your best — your {_BUCKET_LABEL[best]} "
+                   f"runs come out about {lift * 100:.0f}% more efficient"
+                   f"{dec_note}. Try to schedule the hard stuff then."),
     }
 
 
@@ -105,10 +105,10 @@ def late_run_sleep_insight(runs: pd.DataFrame, sleep: dict) -> dict | None:
         return None
     return {
         "kind": "late_sleep",
-        "title": "Late runs cost you sleep",
-        "detail": (f"After runs starting past 8pm your sleep score averages "
-                   f"{late['next_sleep'].mean():.0f} vs {early['next_sleep'].mean():.0f} "
-                   f"otherwise — try to finish hard efforts earlier."),
+        "title": "Try to finish your runs earlier",
+        "detail": (f"Running past 8pm seems to cost you sleep — you rest noticeably "
+                   f"worse on those nights (about {abs(delta):.0f} points lower). "
+                   f"Wrap up hard efforts earlier in the evening when you can."),
     }
 
 
@@ -128,10 +128,10 @@ def _corr_insight(runs, series_map, *, title_pos, title_neg, detail, kind):
 def sleep_performance_insight(runs: pd.DataFrame, sleep: dict) -> dict | None:
     return _corr_insight(
         runs, sleep, kind="sleep_perf",
-        title_pos="Good sleep lifts your runs",
-        title_neg="Your runs hold up regardless of sleep",
-        detail=("Nights you sleep well line up with more efficient runs the next "
-                "day (r={r:.2f} across {n} runs) — protect sleep before key sessions."))
+        title_pos="Protect your sleep before big sessions",
+        title_neg="Your runs hold up even on rough sleep",
+        detail=("When you sleep well your next run is noticeably sharper, so bank "
+                "a good night before the hard stuff — it clearly pays off for you."))
 
 
 def personal_insights() -> list[dict]:
