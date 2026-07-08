@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 
 from garmin_coach.store import db
@@ -32,7 +33,7 @@ def _runs() -> pd.DataFrame:
     with db.connect() as conn:
         df = pd.read_sql(
             "SELECT start_time, avg_hr, ef, decoupling_pct, avg_cadence_spm, "
-            "distance_m FROM activity_metrics "
+            "distance_m, avg_pace_s_km FROM activity_metrics "
             "WHERE sport LIKE '%running%' AND start_time IS NOT NULL", conn)
     if df.empty:
         return df
@@ -52,16 +53,58 @@ def _health_map(col: str) -> dict:
     return dict(zip(pd.to_datetime(df["day"]).dt.date, df[col]))
 
 
-def _lag_corr(runs, series_map, ycol="ef"):
-    """Correlate a per-day health value with a run metric on the same day.
-    Returns (pearson_r or None, n)."""
-    d = runs.dropna(subset=[ycol]).copy()
+# ---- rigour helpers: control for confounders ------------------------------
+# Insights compare runs of different kinds, so a raw pattern can be a mirage
+# (e.g. "morning runs are efficient" might just mean morning = your easy runs).
+# We remove the linear effect of confounders before judging a pattern.
+#
+# EF = speed / HR, so it is a deterministic function of pace *and* HR — never
+# control for both at once (the residual would be ~0). Controlling for one of
+# them plus distance is the meaningful adjustment.
+
+def _design(df, controls):
+    return np.column_stack([np.ones(len(df))]
+                           + [df[c].to_numpy(float) for c in controls])
+
+
+def _residualise(df, ycol, controls):
+    """df with ``ycol_adj`` = ycol minus the linear effect of controls (mean added
+    back so it stays on the original scale). None if too few clean rows."""
+    sub = df.dropna(subset=[ycol, *controls]).copy()
+    if len(sub) < len(controls) + 10:
+        return None
+    y = sub[ycol].to_numpy(float)
+    z = _design(sub, controls)
+    beta, *_ = np.linalg.lstsq(z, y, rcond=None)
+    sub[ycol + "_adj"] = (y - z @ beta) + y.mean()
+    return sub
+
+
+def _partial_corr(df, xcol, ycol, controls):
+    """Correlation of x and y after removing the linear effect of controls from
+    both. Returns (r or None, n)."""
+    sub = df.dropna(subset=[xcol, ycol, *controls])
+    if len(sub) < len(controls) + _MIN_PAIRS:
+        return None, len(sub)
+    z = _design(sub, controls)
+
+    def resid(col):
+        y = sub[col].to_numpy(float)
+        beta, *_ = np.linalg.lstsq(z, y, rcond=None)
+        return y - z @ beta
+
+    rx, ry = resid(xcol), resid(ycol)
+    if rx.std() == 0 or ry.std() == 0:
+        return None, len(sub)
+    return float(np.corrcoef(rx, ry)[0, 1]), len(sub)
+
+
+def _lag_corr(runs, series_map, ycol="ef", controls=("distance_m", "avg_hr")):
+    """Correlate a per-day health value with a run metric, controlling for run
+    distance + intensity so the link isn't just 'hard days feel different'."""
+    d = runs.copy()
     d["x"] = d["date"].map(lambda k: series_map.get(k))
-    d = d.dropna(subset=["x"])
-    if len(d) < _MIN_PAIRS:
-        return None, 0
-    r = d["x"].corr(d[ycol])
-    return (None if pd.isna(r) else float(r)), len(d)
+    return _partial_corr(d, "x", ycol, list(controls))
 
 
 def _bucket(hour: int) -> str:
@@ -72,32 +115,30 @@ def _bucket(hour: int) -> str:
 
 
 def time_of_day_insight(runs: pd.DataFrame) -> dict | None:
-    """Which time of day the athlete runs most efficiently (EF), if one clearly
-    stands out. EF = speed per heartbeat, so higher = more aerobically efficient."""
+    """Which time of day the athlete runs most efficiently (EF) — after adjusting
+    for run distance + intensity, so it isn't just 'mornings are my easy runs'."""
     d = runs.dropna(subset=["ef"]).copy()
     if len(d) < 2 * _MIN_BUCKET:
         return None
+    adj = _residualise(d, "ef", ["distance_m", "avg_hr"])
+    ycol = "ef_adj" if adj is not None else "ef"   # fall back if controls missing
+    d = adj if adj is not None else d
     d["bucket"] = d["hour"].apply(_bucket)
-    g = d.groupby("bucket").agg(n=("ef", "size"), ef=("ef", "mean"),
-                                decoup=("decoupling_pct", "mean"))
+    g = d.groupby("bucket").agg(n=(ycol, "size"), ef=(ycol, "mean"))
     g = g[g["n"] >= _MIN_BUCKET]
     if len(g) < 2:
         return None
     best = g["ef"].idxmax()
-    rest = d[d["bucket"] != best]["ef"].mean()
+    rest = d[d["bucket"] != best][ycol].mean()
     lift = (g.loc[best, "ef"] - rest) / rest if rest else 0
     if lift < 0.02:                     # < 2% better → not worth calling out
         return None
-    dec_best, dec_rest = g.loc[best, "decoup"], d[d["bucket"] != best]["decoupling_pct"].mean()
-    dec_note = ""
-    if pd.notna(dec_best) and pd.notna(dec_rest) and dec_best < dec_rest - 1:
-        dec_note = " and you hold pace better through the run"
     return {
         "kind": "time_of_day",
         "title": f"Run your key sessions in the {best}",
-        "detail": (f"That's when you're at your best — your {_BUCKET_LABEL[best]} "
-                   f"runs come out about {lift * 100:.0f}% more efficient"
-                   f"{dec_note}. Try to schedule the hard stuff then."),
+        "detail": (f"Even comparing like-for-like runs, your {_BUCKET_LABEL[best]} "
+                   f"runs come out about {lift * 100:.0f}% more efficient — that's "
+                   f"genuinely your best window. Schedule the hard stuff then."),
     }
 
 
@@ -147,18 +188,16 @@ def rest_day_rebound_insight(runs: pd.DataFrame) -> dict | None:
 
 
 def cadence_efficiency_insight(runs: pd.DataFrame) -> dict | None:
-    """Whether a quicker cadence goes with more efficient running for the athlete."""
-    d = runs.dropna(subset=["ef", "avg_cadence_spm"])
-    if len(d) < _MIN_PAIRS:
-        return None
-    r = d["avg_cadence_spm"].corr(d["ef"])
-    if pd.isna(r) or r < 0.25:
+    """Whether a quicker cadence goes with better economy — controlling for pace,
+    so it isn't just 'faster runs have both a higher cadence and higher EF'."""
+    r, _ = _partial_corr(runs, "avg_cadence_spm", "ef", ["avg_pace_s_km"])
+    if r is None or r < 0.25:
         return None
     return {
         "kind": "cadence",
         "title": "Lean into a quicker cadence",
-        "detail": ("Your runs come out more efficient when your cadence is higher — "
-                   "a slightly quicker turnover pays off for you."),
+        "detail": ("Even at the same pace, your higher-cadence runs take less effort "
+                   "(better economy) — a slightly quicker turnover pays off for you."),
     }
 
 

@@ -48,8 +48,20 @@ def test_rest_day_rebound_surfaced(add_metric):
 
 
 def test_cadence_efficiency_surfaced(add_metric):
-    # Efficiency rises with cadence → a positive, actionable link.
+    # Cadence lifts efficiency *independently of pace* (pace varies separately),
+    # so the link survives controlling for pace.
     for i in range(30):
         add_metric(f"2026-03-{(i % 28) + 1:02d}T{8 + i % 3:02d}:00:00",
-                   ef=0.90 + i * 0.005, avg_cadence_spm=160 + i)
+                   ef=0.90 + i * 0.005, avg_cadence_spm=160 + i,
+                   avg_pace_s_km=360 + (i % 5) * 4)
     assert [i for i in patterns.personal_insights() if i["kind"] == "cadence"]
+
+
+def test_cadence_spurious_when_only_pace_driven(add_metric):
+    # Higher cadence AND higher EF both just track faster pace → the partial
+    # correlation (controlling pace) should kill the insight.
+    for i in range(30):
+        pace = 400 - i * 3          # faster over time
+        add_metric(f"2026-03-{(i % 28) + 1:02d}T{8 + i % 3:02d}:00:00",
+                   ef=0.90 + i * 0.006, avg_cadence_spm=160 + i, avg_pace_s_km=pace)
+    assert [i for i in patterns.personal_insights() if i["kind"] == "cadence"] == []
