@@ -86,7 +86,9 @@ def _watchout_chips(flags):
     return dmc.Group(chips, gap="xs")
 
 
-_INSIGHT_ICON = {"time_of_day": "🕑", "late_sleep": "😴", "sleep_perf": "😴"}
+_INSIGHT_ICON = {"time_of_day": "🕑", "late_sleep": "😴", "sleep_perf": "😴",
+                 "rest_rebound": "🛌", "cadence": "🦶", "readiness": "⚡",
+                 "hrv": "💓", "resting_hr": "❤️"}
 
 
 def _insights_blocks():

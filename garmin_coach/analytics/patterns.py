@@ -31,7 +31,8 @@ _MIN_LATE = 6         # late-run nights needed to judge the sleep effect
 def _runs() -> pd.DataFrame:
     with db.connect() as conn:
         df = pd.read_sql(
-            "SELECT start_time, avg_hr, ef, decoupling_pct FROM activity_metrics "
+            "SELECT start_time, avg_hr, ef, decoupling_pct, avg_cadence_spm, "
+            "distance_m FROM activity_metrics "
             "WHERE sport LIKE '%running%' AND start_time IS NOT NULL", conn)
     if df.empty:
         return df
@@ -42,14 +43,25 @@ def _runs() -> pd.DataFrame:
     return df
 
 
-def _sleep_map() -> dict:
+def _health_map(col: str) -> dict:
     with db.connect() as conn:
         df = pd.read_sql(
-            "SELECT day, sleep_score FROM health_daily WHERE sleep_score IS NOT NULL",
-            conn)
+            f"SELECT day, {col} FROM health_daily WHERE {col} IS NOT NULL", conn)
     if df.empty:
         return {}
-    return dict(zip(pd.to_datetime(df["day"]).dt.date, df["sleep_score"]))
+    return dict(zip(pd.to_datetime(df["day"]).dt.date, df[col]))
+
+
+def _lag_corr(runs, series_map, ycol="ef"):
+    """Correlate a per-day health value with a run metric on the same day.
+    Returns (pearson_r or None, n)."""
+    d = runs.dropna(subset=[ycol]).copy()
+    d["x"] = d["date"].map(lambda k: series_map.get(k))
+    d = d.dropna(subset=["x"])
+    if len(d) < _MIN_PAIRS:
+        return None, 0
+    r = d["x"].corr(d[ycol])
+    return (None if pd.isna(r) else float(r)), len(d)
 
 
 def _bucket(hour: int) -> str:
@@ -112,37 +124,109 @@ def late_run_sleep_insight(runs: pd.DataFrame, sleep: dict) -> dict | None:
     }
 
 
-def _corr_insight(runs, series_map, *, title_pos, title_neg, detail, kind):
+def rest_day_rebound_insight(runs: pd.DataFrame) -> dict | None:
+    """Whether the athlete runs better on days *following a rest day* than on
+    back-to-back days — a sign hard efforts need spacing."""
     d = runs.dropna(subset=["ef"]).copy()
-    d["x"] = d["date"].apply(lambda x: series_map.get(x))
-    d = d.dropna(subset=["x"])
+    if len(d) < 2 * _MIN_BUCKET:
+        return None
+    dates = set(d["date"])
+    d["rested"] = d["date"].apply(lambda x: (x - dt.timedelta(days=1)) not in dates)
+    rested, b2b = d[d["rested"]], d[~d["rested"]]
+    if len(rested) < _MIN_BUCKET or len(b2b) < _MIN_BUCKET:
+        return None
+    lift = (rested["ef"].mean() - b2b["ef"].mean()) / b2b["ef"].mean()
+    if lift < 0.02:
+        return None
+    return {
+        "kind": "rest_rebound",
+        "title": "Put a rest day before big sessions",
+        "detail": (f"You run about {lift * 100:.0f}% better the day after a rest "
+                   f"day than on back-to-back days — space your hard efforts out."),
+    }
+
+
+def cadence_efficiency_insight(runs: pd.DataFrame) -> dict | None:
+    """Whether a quicker cadence goes with more efficient running for the athlete."""
+    d = runs.dropna(subset=["ef", "avg_cadence_spm"])
     if len(d) < _MIN_PAIRS:
         return None
-    r = d["x"].corr(d["ef"])
-    if pd.isna(r) or abs(r) < 0.25:
+    r = d["avg_cadence_spm"].corr(d["ef"])
+    if pd.isna(r) or r < 0.25:
         return None
-    return {"kind": kind, "title": title_pos if r > 0 else title_neg,
-            "detail": detail.format(r=abs(r), n=len(d))}
+    return {
+        "kind": "cadence",
+        "title": "Lean into a quicker cadence",
+        "detail": ("Your runs come out more efficient when your cadence is higher — "
+                   "a slightly quicker turnover pays off for you."),
+    }
 
 
-def sleep_performance_insight(runs: pd.DataFrame, sleep: dict) -> dict | None:
-    return _corr_insight(
-        runs, sleep, kind="sleep_perf",
-        title_pos="Protect your sleep before big sessions",
-        title_neg="Your runs hold up even on rough sleep",
-        detail=("When you sleep well your next run is noticeably sharper, so bank "
-                "a good night before the hard stuff — it clearly pays off for you."))
+def readiness_performance_insight(runs, readiness) -> dict | None:
+    r, _ = _lag_corr(runs, readiness)
+    if r is None or r < 0.25:
+        return None
+    return {
+        "kind": "readiness",
+        "title": "Trust your green days",
+        "detail": ("When Garmin flags you as ready your runs come out sharper — "
+                   "save the quality sessions for high-readiness days."),
+    }
+
+
+def hrv_performance_insight(runs, hrv) -> dict | None:
+    r, _ = _lag_corr(runs, hrv)
+    if r is None or r < 0.25:
+        return None
+    return {
+        "kind": "hrv",
+        "title": "Let HRV pick your hard days",
+        "detail": ("Your runs are noticeably better on high-HRV mornings — push "
+                   "when HRV is up and keep it easy when it dips."),
+    }
+
+
+def resting_hr_insight(runs, rhr) -> dict | None:
+    r, _ = _lag_corr(runs, rhr)
+    if r is None or r > -0.25:          # want a real *negative* link
+        return None
+    return {
+        "kind": "resting_hr",
+        "title": "Ease off when your resting HR is up",
+        "detail": ("A higher-than-usual resting heart rate lines up with flatter "
+                   "runs for you — treat it as a cue to go easy that day."),
+    }
+
+
+def sleep_performance_insight(runs, sleep) -> dict | None:
+    r, _ = _lag_corr(runs, sleep)
+    if r is None or r < 0.25:
+        return None
+    return {
+        "kind": "sleep_perf",
+        "title": "Protect your sleep before big sessions",
+        "detail": ("When you sleep well your next run is noticeably sharper, so "
+                   "bank a good night before the hard stuff — it pays off for you."),
+    }
 
 
 def personal_insights() -> list[dict]:
-    """All patterns that clear their significance bar, strongest first."""
+    """All patterns that clear their significance bar, most actionable first."""
     runs = _runs()
     if runs.empty:
         return []
-    sleep = _sleep_map()
+    sleep = _health_map("sleep_score")
+    readiness = _health_map("readiness_score")
+    hrv = _health_map("hrv_overnight")
+    rhr = _health_map("resting_hr")
     candidates = [
         time_of_day_insight(runs),
-        late_run_sleep_insight(runs, sleep),
+        rest_day_rebound_insight(runs),
+        readiness_performance_insight(runs, readiness),
+        hrv_performance_insight(runs, hrv),
+        resting_hr_insight(runs, rhr),
         sleep_performance_insight(runs, sleep),
+        cadence_efficiency_insight(runs),
+        late_run_sleep_insight(runs, sleep),
     ]
     return [c for c in candidates if c]
