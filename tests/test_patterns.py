@@ -35,3 +35,21 @@ def test_uniform_efficiency_surfaces_nothing(add_metric):
     _seed(add_metric, 7, 1.05, 15, day_start=1)
     _seed(add_metric, 20, 1.05, 15, day_start=1)
     assert [i for i in patterns.personal_insights() if i["kind"] == "time_of_day"] == []
+
+
+def test_rest_day_rebound_surfaced(add_metric):
+    # Consecutive days (back-to-back) run weaker; spaced days (rested) run stronger.
+    for d in range(1, 15):                       # Mar 1–14 back-to-back, weaker
+        add_metric(f"2026-03-{d:02d}T08:00:00", ef=1.00, avg_cadence_spm=170)
+    for d in range(1, 26, 2):                    # Apr, every other day → rested, stronger
+        add_metric(f"2026-04-{d:02d}T08:00:00", ef=1.12, avg_cadence_spm=170)
+    ins = [i for i in patterns.personal_insights() if i["kind"] == "rest_rebound"]
+    assert ins and "rest day" in ins[0]["detail"].lower()
+
+
+def test_cadence_efficiency_surfaced(add_metric):
+    # Efficiency rises with cadence → a positive, actionable link.
+    for i in range(30):
+        add_metric(f"2026-03-{(i % 28) + 1:02d}T{8 + i % 3:02d}:00:00",
+                   ef=0.90 + i * 0.005, avg_cadence_spm=160 + i)
+    assert [i for i in patterns.personal_insights() if i["kind"] == "cadence"]
