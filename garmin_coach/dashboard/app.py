@@ -32,7 +32,10 @@ db.init_db()
 _dash_renderer._set_react_version("18.2.0")
 
 app = dash.Dash(__name__, external_stylesheets=dmc.styles.ALL,
-                title="Garmin Coach", suppress_callback_exceptions=True)
+                title="Garmin Coach", suppress_callback_exceptions=True,
+                # Render at device width on phones (not a zoomed-out desktop).
+                meta_tags=[{"name": "viewport",
+                            "content": "width=device-width, initial-scale=1"}])
 server = app.server
 
 # Set the page background before the React app mounts so there's no flash.
