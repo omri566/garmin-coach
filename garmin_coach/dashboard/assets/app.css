@@ -630,3 +630,22 @@ table.mantine-Table-table { font-size: 0.9rem; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ============ phones (narrow screens) ============ */
+@media (max-width: 640px) {
+  .gc-shell { padding-left: 12px; padding-right: 12px; }
+  .gc-nav { flex-wrap: wrap; gap: 10px; }
+
+  /* Plan: one day per row, and drop empty/rest days so it reads as a tight
+     vertical list of the actual sessions instead of a cramped 7-col grid. */
+  .plan-board-grid { grid-template-columns: 1fr !important; }
+  .plan-daycol:has(.plan-empty) { display: none; }
+  .plan-daycol { min-height: auto; }
+  .plan-nav-arrow { width: 34px; height: 34px; font-size: 1rem; }
+
+  /* Wide tables scroll horizontally instead of blowing out the page width. */
+  .gc-card table, .mantine-Table-root { display: block; overflow-x: auto; }
+
+  /* Give charts a little more height so labels stay legible when narrow. */
+  .js-plotly-plot { min-height: 260px; }
+}
