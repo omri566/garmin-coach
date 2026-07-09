@@ -191,14 +191,18 @@ def _fmt_day(d: str | None) -> str:
 
 
 @callback(Output("tab-overview", "children"), Output("sync-status", "children"),
+          Output("an-run", "data"), Output("an-run", "value"),
           Input("sync-btn", "n_clicks"), prevent_initial_call=True)
 def sync_now(_n):
-    """Pull new Garmin activities + health, recompute metrics, refresh Overview.
+    """Pull new Garmin activities + health, recompute metrics, and refresh the
+    Overview *and* the Deep-Analysis run picker (which is otherwise built once at
+    page load, so a freshly-synced run wouldn't appear there without a reload).
 
     Data-only: skips the slow LLM recommendation refresh and profile re-fetch —
     use the Coach tab's 'Refresh recommendations' for those.
     """
     from garmin_coach import pipeline
+    from garmin_coach.dashboard import data
 
     try:
         before = _activity_count()
@@ -206,7 +210,8 @@ def sync_now(_n):
                         refresh_recommendations=False)
         new = _activity_count() - before
     except Exception as exc:  # noqa: BLE001 — surface the failure in the UI.
-        return dash.no_update, html.Span(f"Sync failed · {exc}", className="err")
+        return (dash.no_update, html.Span(f"Sync failed · {exc}", className="err"),
+                dash.no_update, dash.no_update)
 
     la, lh = _latest_dates()
     head = (f"Synced · {new} new workout{'s' if new != 1 else ''}"
@@ -215,7 +220,11 @@ def sync_now(_n):
         freshness = f"data through {_fmt_day(la)}"
     else:
         freshness = f"runs to {_fmt_day(la)} · health to {_fmt_day(lh)}"
-    return overview.layout(), html.Span(f"{head} · {freshness}", className="ok")
+    # Rebuild the run picker; select the newest run so Deep Analysis shows it.
+    opts = data.run_options()
+    value = opts[0]["value"] if opts else dash.no_update
+    return (overview.layout(), html.Span(f"{head} · {freshness}", className="ok"),
+            opts, value)
 
 
 app.layout = layout
