@@ -230,5 +230,11 @@ def sync_now(_n):
 app.layout = layout
 
 if __name__ == "__main__":
+    import os
+    # Local dev keeps the old behaviour (localhost + hot reload); a server sets
+    # GC_HOST=0.0.0.0 and GC_DEBUG=0 to serve on the network without the reloader.
     # threaded so a slow LLM callback doesn't block the whole UI.
-    app.run(debug=True, port=8050, threaded=True)
+    app.run(host=os.getenv("GC_HOST", "127.0.0.1"),
+            port=int(os.getenv("GC_PORT", "8050")),
+            debug=os.getenv("GC_DEBUG", "1") == "1",
+            threaded=True)
