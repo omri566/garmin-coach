@@ -7,6 +7,7 @@ import re
 import dash_mantine_components as dmc
 from dash import Input, Output, callback, html
 
+from garmin_coach.analytics import segments
 from garmin_coach.coach import plan as plan_mod
 from garmin_coach.coach import recommend as rec_mod
 from garmin_coach.coach import schedule
@@ -257,6 +258,23 @@ def _parse_target(text):
     return out
 
 
+# Structured sessions are judged on their work segment, not the whole-run average.
+_STRUCTURED = ("tempo", "interval", "threshold", "workout", "vo2", "cruise",
+               "fartlek", "speed", "race")
+
+
+def _is_structured(session_type: str) -> bool:
+    t = (session_type or "").lower()
+    return any(k in t for k in _STRUCTURED)
+
+
+def _rep_seconds(text: str) -> int:
+    """Work-window length parsed from the target ('2 × 5 min' → 300s); ~5 min if
+    it can't be read."""
+    m = re.search(r"(\d+)\s*min", text or "")
+    return max(60, min(900, int(m.group(1)) * 60)) if m else 300
+
+
 def _matched_session(r):
     """The planned session this run fulfilled, via the schedule auto-match."""
     plan = plan_mod.load_latest()
@@ -270,49 +288,87 @@ def _matched_session(r):
     return None
 
 
+def _verdict_reps(r, t, text):
+    """Judge a structured session on its fastest sustained work segment (from the
+    per-second streams) instead of the whole-run average, which a warm-up/cool-down
+    drags below rep pace. Returns (checks, too_hard, too_easy)."""
+    checks, too_hard, too_easy = [], False, False
+    seg = (segments.best_sustained(data.run_streams(r["activity_id"]),
+                                   _rep_seconds(text)) if r.get("activity_id") else None)
+    if not (seg and seg.get("pace_s_km")):
+        return [("Work reps", "no per-second data to check the reps", "soft")], False, False
+    wp, mins = seg["pace_s_km"], seg["minutes"]
+    tgt = (t["pace_lo"] + t["pace_hi"]) / 2
+    if wp < t["pace_lo"] - 10:
+        checks.append(("Work reps", f"fastest {mins} min {fmt_pace(wp)} — faster than "
+                       f"the {fmt_pace(tgt)} target", "warn"))
+        too_hard = True
+    elif wp > t["pace_hi"] + 12:
+        checks.append(("Work reps", f"fastest {mins} min {fmt_pace(wp)} — slower than "
+                       f"the {fmt_pace(tgt)} target", "soft"))
+        too_easy = True
+    else:
+        checks.append(("Work reps", f"fastest {mins} min {fmt_pace(wp)} — on the "
+                       f"{fmt_pace(tgt)} target", "ok"))
+    if seg.get("hr"):
+        checks.append(("HR in the work", f"{seg['hr']:.0f} bpm", "ok"))
+    return checks, too_hard, too_easy
+
+
 def _run_verdict(r, session):
     """(headline, badge_tone, [(label, detail, chip_kind)…]) comparing run↔plan."""
     pace, hr = r.get("avg_pace_s_km"), r.get("avg_hr")
     dist = (r.get("distance_m") or 0) / 1000
     decoup = r.get("decoupling_pct")
-    checks, too_hard, too_easy = [], False, False
+    checks, too_hard, too_easy, structured = [], False, False, False
 
     if session:
-        t = _parse_target(f"{session.get('target','')} {session.get('description','')}")
-        if pace and "pace_lo" in t:
-            if pace < t["pace_lo"] - 8:
-                checks.append(("Pace", f"{fmt_pace(pace)} — faster than prescribed", "warn"))
-                too_hard = True
-            elif pace > t["pace_hi"] + 12:
-                checks.append(("Pace", f"{fmt_pace(pace)} — slower than prescribed", "soft"))
-                too_easy = True
-            else:
-                checks.append(("Pace", f"{fmt_pace(pace)} — in target range", "ok"))
-        if hr and "hr_cap" in t:
-            if hr <= t["hr_cap"] + 2:
-                checks.append(("Heart rate", f"{hr:.0f} — within Z2 cap (<{t['hr_cap']})", "ok"))
-            else:
-                checks.append(("Heart rate", f"{hr:.0f} — above cap (<{t['hr_cap']})", "warn"))
-                too_hard = True
-        if "dist_km" in t and dist:
-            tol = max(0.5, 0.12 * t["dist_km"])
-            tag = (f"{dist:.1f}/{t['dist_km']:.0f} km")
-            if abs(dist - t["dist_km"]) <= tol:
-                checks.append(("Distance", f"{tag} — on target", "ok"))
-            else:
-                checks.append(("Distance", f"{tag} — {'longer' if dist > t['dist_km'] else 'short'}", "soft"))
-        if too_hard:
-            head, tone = "Ran harder than prescribed", "orange"
-        elif too_easy and not any(c[2] == "ok" for c in checks):
-            head, tone = "Easier than planned", "blue"
-        elif any(c[2] == "ok" for c in checks):
-            head, tone = "On plan", "green"
+        text = f"{session.get('target','')} {session.get('description','')}"
+        t = _parse_target(text)
+        structured = _is_structured(session.get("type"))
+
+        if structured and "pace_lo" in t:
+            checks, too_hard, too_easy = _verdict_reps(r, t, text)
         else:
-            head, tone = "Logged", "gray"
+            if pace and "pace_lo" in t:
+                if pace < t["pace_lo"] - 8:
+                    checks.append(("Pace", f"{fmt_pace(pace)} — faster than prescribed", "warn"))
+                    too_hard = True
+                elif pace > t["pace_hi"] + 12:
+                    checks.append(("Pace", f"{fmt_pace(pace)} — slower than prescribed", "soft"))
+                    too_easy = True
+                else:
+                    checks.append(("Pace", f"{fmt_pace(pace)} — in target range", "ok"))
+            if hr and "hr_cap" in t:
+                if hr <= t["hr_cap"] + 2:
+                    checks.append(("Heart rate", f"{hr:.0f} — within Z2 cap (<{t['hr_cap']})", "ok"))
+                else:
+                    checks.append(("Heart rate", f"{hr:.0f} — above cap (<{t['hr_cap']})", "warn"))
+                    too_hard = True
+            if "dist_km" in t and dist:
+                tol = max(0.5, 0.12 * t["dist_km"])
+                tag = (f"{dist:.1f}/{t['dist_km']:.0f} km")
+                if abs(dist - t["dist_km"]) <= tol:
+                    checks.append(("Distance", f"{tag} — on target", "ok"))
+                else:
+                    checks.append(("Distance", f"{tag} — {'longer' if dist > t['dist_km'] else 'short'}", "soft"))
+
+        ok_any = any(c[2] == "ok" for c in checks)
+        if structured:
+            head, tone = (("Ran the reps hard", "orange") if too_hard
+                          else ("Reps under target", "blue") if too_easy and not ok_any
+                          else ("Workout on target", "green") if ok_any
+                          else ("Logged", "gray"))
+        else:
+            head, tone = (("Ran harder than prescribed", "orange") if too_hard
+                          else ("Easier than planned", "blue") if too_easy and not ok_any
+                          else ("On plan", "green") if ok_any
+                          else ("Logged", "gray"))
     else:
         head, tone = "Extra session — not in plan", "grape"
 
-    if decoup is not None:
+    # Decoupling reads durability on steady runs; on intervals it's by design, skip.
+    if decoup is not None and not structured:
         if decoup <= 5:
             checks.append(("Durability", f"{decoup:.1f}% decoupling — held pace", "ok"))
         else:
