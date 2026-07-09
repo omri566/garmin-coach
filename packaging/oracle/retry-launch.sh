@@ -19,7 +19,8 @@ MEM_GB="${MEM_GB:-6}"
 VCN_NAME="${VCN_NAME:-garmin-vcn}"
 OS="Canonical Ubuntu"
 OS_VER="22.04"
-SLEEP="${SLEEP:-60}"          # seconds between attempts
+BASE="${SLEEP:-180}"         # base seconds between attempts (Oracle rate-limits launch)
+MAXWAIT=900                  # cap the backoff at 15 min
 KEY="$HOME/.ssh/garmin_coach"
 
 # ---- compartment = tenancy root ----
@@ -49,9 +50,9 @@ echo "→ AD=$AD"
 echo "→ subnet=$SUBNET_ID"
 echo "→ image=$IMAGE_ID"
 echo "→ ssh key=$KEY (private key stays in Cloud Shell)"
-echo "→ launching every ${SLEEP}s until capacity is available… (Ctrl-C to stop)"
+echo "→ launching every ~${BASE}s (with backoff when rate-limited) until capacity opens… (Ctrl-C to stop)"
 
-n=0
+n=0; backoff=0
 while true; do
   n=$((n + 1))
   RES=$(oci compute instance launch \
@@ -75,12 +76,17 @@ while true; do
     echo "   PUBLIC IP : ${IP:-"(open the instance in the console to see it)"}"
     echo "   SSH from Cloud Shell:  ssh -i $KEY ubuntu@${IP:-<ip>}"
     break
+  elif echo "$RES" | grep -qiE "TooManyRequests|429|rate.?limit"; then
+    backoff=$((backoff + 1))
+    w=$(( BASE * (1 << backoff) )); [ "$w" -gt "$MAXWAIT" ] && w=$MAXWAIT
+    w=$(( w + RANDOM % 30 ))
+    echo "[$n] $(date +%H:%M:%S) rate limited — backing off ${w}s"
+    sleep "$w"
   elif echo "$RES" | grep -qiE "capacity"; then
-    echo "[$n] $(date +%H:%M:%S) out of capacity — retry in ${SLEEP}s"
-    sleep "$SLEEP"
-  elif echo "$RES" | grep -qiE "TooManyRequests|429|rate"; then
-    echo "[$n] rate limited — backing off $((SLEEP * 2))s"
-    sleep $((SLEEP * 2))
+    backoff=0                              # a capacity reply means we're not throttled
+    w=$(( BASE + RANDOM % 30 ))
+    echo "[$n] $(date +%H:%M:%S) out of capacity — retry in ${w}s"
+    sleep "$w"
   else
     echo "!! launch failed for a non-capacity reason — showing it so we can fix:"
     echo "$RES"
