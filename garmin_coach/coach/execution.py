@@ -17,12 +17,24 @@ from garmin_coach.llm import get_provider
 _DIR = config.DATA_DIR / "verdicts"
 
 SYSTEM = (
-    "You are an experienced running coach giving a short, honest, specific read "
-    "of how an athlete executed ONE planned workout. Judge the work intervals, "
-    "not the whole-run average — the warm-up and cool-down pull the average pace "
-    "well below rep pace. 1-2 sentences, specific with the numbers, encouraging "
-    "but truthful."
+    "You are an experienced running coach giving an honest, specific read of how "
+    "an athlete executed ONE planned workout. Judge the work intervals, not the "
+    "whole-run average — the warm-up and cool-down pull the average pace well "
+    "below rep pace. Return a punchy one-line 'headline' verdict (max ~9 words, "
+    "no numbers needed) and a 'detail' of 1-2 sentences with the specific rep "
+    "pace/HR. Encouraging but truthful."
 )
+
+NOTE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headline": {"type": "string",
+                     "description": "punchy one-line verdict, ~9 words max"},
+        "detail": {"type": "string",
+                   "description": "1-2 sentences with the specific rep numbers"},
+    },
+    "required": ["headline", "detail"],
+}
 
 
 def _pace(s) -> str:
@@ -61,13 +73,16 @@ def make_note(session: dict, run: dict, streams, provider=None,
         f"{run.get('avg_hr') and round(run['avg_hr'])}.\n"
         f"Hardest effort: {seg_txt}.\n"
         f"Per-km splits: {split_txt}.\n\n"
-        "In 1-2 sentences, tell the athlete how well they executed THIS workout's "
-        "intervals — reference the rep pace/HR, and don't be fooled by the average."
+        "Give a short headline verdict + a 1-2 sentence detail on how well they "
+        "executed THIS workout's intervals — reference the rep pace/HR, and don't "
+        "be fooled by the average."
     )
-    note = provider.generate(prompt, system=SYSTEM, model=model).strip()
+    res = provider.generate_json(prompt, NOTE_SCHEMA, system=SYSTEM, model=model)
+    out = {"headline": (res.get("headline") or "").strip(),
+           "detail": (res.get("detail") or "").strip()}
     _DIR.mkdir(parents=True, exist_ok=True)
     _path(aid).write_text(json.dumps({
-        "activity_id": aid, "note": note, "target": target,
+        "activity_id": aid, **out, "target": target,
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
     }, indent=2))
-    return note
+    return out

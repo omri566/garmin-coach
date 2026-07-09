@@ -377,14 +377,28 @@ def _run_verdict(r, session):
     return head, tone, checks
 
 
+def _note_view(hit):
+    """Headline + expandable detail (handles both the new {headline,detail} shape
+    and any older cached {note})."""
+    headline = hit.get("headline") or hit.get("note", "")
+    detail = hit.get("detail") or (hit.get("note", "") if not hit.get("headline") else "")
+    children = [dmc.Text(headline, size="sm", fw=600, style={"lineHeight": 1.4})]
+    if detail and detail != headline:
+        children.append(dmc.Spoiler(
+            showLabel="more", hideLabel="less", maxHeight=0,
+            children=dmc.Text(detail, size="sm", c="dimmed", mt=4,
+                              style={"lineHeight": 1.5})))
+    return html.Div(children)
+
+
 def _ai_note_block(r, session):
-    """For a structured session, the coach's natural-language execution note —
-    shown if cached, else a button to generate it (one LLM call, then cached)."""
+    """For a structured session, the coach's execution note — a short headline
+    (expandable) if cached, else a button to generate it (one LLM call, cached)."""
     if not (session and _is_structured(session.get("type"))):
         return None
     from garmin_coach.coach import execution
     hit = execution.cached(r.get("activity_id"))
-    body = (dmc.Text(hit["note"], size="sm", style={"lineHeight": 1.5}) if hit
+    body = (_note_view(hit) if hit
             else dmc.Button("Coach's read of this workout →", id="last-run-ai-btn",
                             variant="light", size="xs"))
     return html.Div([
@@ -402,8 +416,7 @@ def _generate_ai_note(_n):
     session = _matched_session(r)
     if not (r and session):
         raise PreventUpdate
-    note = execution.make_note(session, r, data.run_streams(r["activity_id"]))
-    return dmc.Text(note, size="sm", style={"lineHeight": 1.5})
+    return _note_view(execution.make_note(session, r, data.run_streams(r["activity_id"])))
 
 
 def last_run_section():
