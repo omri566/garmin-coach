@@ -94,7 +94,10 @@ def _partial_corr(df, xcol, ycol, controls):
         return y - z @ beta
 
     rx, ry = resid(xcol), resid(ycol)
-    if rx.std() == 0 or ry.std() == 0:
+    # If a control explains virtually all of x's or y's variance, the residuals
+    # are just numerical noise and the partial correlation is meaningless — bail
+    # rather than report a spurious link.
+    if rx.std() < 1e-9 * (sub[xcol].std() or 1) or ry.std() < 1e-9 * (sub[ycol].std() or 1):
         return None, len(sub)
     return float(np.corrcoef(rx, ry)[0, 1]), len(sub)
 

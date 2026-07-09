@@ -5,6 +5,8 @@ a real, big-enough effect — never as generic advice.
 """
 from __future__ import annotations
 
+import random
+
 from garmin_coach.analytics import patterns
 
 
@@ -58,10 +60,15 @@ def test_cadence_efficiency_surfaced(add_metric):
 
 
 def test_cadence_spurious_when_only_pace_driven(add_metric):
-    # Higher cadence AND higher EF both just track faster pace → the partial
-    # correlation (controlling pace) should kill the insight.
-    for i in range(30):
-        pace = 400 - i * 3          # faster over time
-        add_metric(f"2026-03-{(i % 28) + 1:02d}T{8 + i % 3:02d}:00:00",
-                   ef=0.90 + i * 0.006, avg_cadence_spm=160 + i, avg_pace_s_km=pace)
+    # Cadence and EF are each driven by pace plus their OWN independent noise, so
+    # there's no real cadence->EF link once pace is held constant. (Independent
+    # noise avoids perfect collinearity, which would make the partial correlation
+    # numerically unstable.)
+    rng = random.Random(42)
+    for i in range(40):
+        pace = 380 + rng.uniform(-40, 40)                 # pace varies
+        ef = 1.30 - 0.0011 * pace + rng.uniform(-0.02, 0.02)
+        cad = 250 - 0.20 * pace + rng.uniform(-3, 3)      # independent noise
+        add_metric(f"2026-03-{(i % 28) + 1:02d}T08:00:00",
+                   ef=ef, avg_cadence_spm=cad, avg_pace_s_km=pace)
     assert [i for i in patterns.personal_insights() if i["kind"] == "cadence"] == []
