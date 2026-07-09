@@ -5,7 +5,8 @@ import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import Input, Output, callback, html
+from dash import Input, Output, callback, dcc, html
+from dash.exceptions import PreventUpdate
 
 from garmin_coach.analytics import segments
 from garmin_coach.coach import plan as plan_mod
@@ -376,6 +377,35 @@ def _run_verdict(r, session):
     return head, tone, checks
 
 
+def _ai_note_block(r, session):
+    """For a structured session, the coach's natural-language execution note —
+    shown if cached, else a button to generate it (one LLM call, then cached)."""
+    if not (session and _is_structured(session.get("type"))):
+        return None
+    from garmin_coach.coach import execution
+    hit = execution.cached(r.get("activity_id"))
+    body = (dmc.Text(hit["note"], size="sm", style={"lineHeight": 1.5}) if hit
+            else dmc.Button("Coach's read of this workout →", id="last-run-ai-btn",
+                            variant="light", size="xs"))
+    return html.Div([
+        dmc.Divider(my="sm"),
+        dmc.Text("Coach's read", size="xs", c="dimmed", tt="uppercase", fw=600, mb=6),
+        dcc.Loading(html.Div(body, id="last-run-ai-out"), type="dot", color="#FFB02E"),
+    ])
+
+
+@callback(Output("last-run-ai-out", "children"),
+          Input("last-run-ai-btn", "n_clicks"), prevent_initial_call=True)
+def _generate_ai_note(_n):
+    from garmin_coach.coach import execution
+    r = data.last_run()
+    session = _matched_session(r)
+    if not (r and session):
+        raise PreventUpdate
+    note = execution.make_note(session, r, data.run_streams(r["activity_id"]))
+    return dmc.Text(note, size="sm", style={"lineHeight": 1.5})
+
+
 def last_run_section():
     r = data.last_run()
     if not r:
@@ -409,6 +439,7 @@ def last_run_section():
                       variant="light", size="sm"),
         ], justify="space-between", wrap="nowrap") for label, detail, kind in checks],
             gap=8),
+        _ai_note_block(r, session),
     ], **CARD)
 
     return dmc.Grid([

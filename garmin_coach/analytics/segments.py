@@ -34,3 +34,19 @@ def best_sustained(streams, seconds: int) -> dict | None:
           if "heart_rate" in seg.columns and seg["heart_rate"].notna().any() else None)
     return {"pace_s_km": 1000.0 / ms, "hr": hr,
             "seconds": len(seg), "minutes": max(1, round(len(seg) / 60))}
+
+
+def km_splits(streams, max_km: int = 25) -> list[int]:
+    """Seconds per kilometre (1 Hz streams), so a coach/LLM sees the shape of the
+    run — slow warm-up, fast reps, slow cool-down — not just the average."""
+    if streams is None or getattr(streams, "empty", True) or "distance" not in streams.columns:
+        return []
+    dist = streams["distance"].ffill().reset_index(drop=True)
+    splits, prev_i, k = [], 0, 1
+    for i, dm in enumerate(dist):
+        if dm is None:
+            continue
+        while dm >= k * 1000 and k <= max_km:
+            splits.append(int(i - prev_i))
+            prev_i, k = i, k + 1
+    return splits
