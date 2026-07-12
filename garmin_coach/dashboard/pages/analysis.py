@@ -141,7 +141,7 @@ def layout():
         ], align="center"),
         html.Div(id="an-summary"),
         html.Div(dmc.Accordion(
-            id="an-workout-acc", multiple=True, value=["workout"],
+            id="an-workout-acc", multiple=True, value=[],
             chevronPosition="right", variant="separated", children=[
                 dmc.AccordionItem([
                     dmc.AccordionControl(dmc.Group([

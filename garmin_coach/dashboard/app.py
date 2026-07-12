@@ -76,7 +76,13 @@ def _shell_inner():
                                   style={"marginRight": "8px", "fontSize": "0.7em"}),
                         "Garmin Coach",
                     ], className="gc-wordmark"),
-                    html.Div("endurance telemetry", className="gc-tagline"),
+                    html.Div(className="gc-sync-cluster", children=[
+                        dcc.Loading(
+                            html.Span(id="sync-status", className="gc-sync-status"),
+                            type="dot", color=figures.AMP),
+                        dmc.Button("↻ Sync now", id="sync-btn",
+                                   variant="default", size="sm"),
+                    ]),
                 ]),
                 html.Div(className="gc-nav", children=[
                     dmc.SegmentedControl(
@@ -85,13 +91,6 @@ def _shell_inner():
                               {"label": "Deep Analysis", "value": "analysis"},
                               {"label": "Coach", "value": "coach"}],
                     ),
-                    html.Div(className="gc-sync-cluster", children=[
-                        dcc.Loading(
-                            html.Span(id="sync-status", className="gc-sync-status"),
-                            type="dot", color=figures.AMP),
-                        dmc.Button("↻ Sync now", id="sync-btn",
-                                   variant="default", size="sm"),
-                    ]),
                 ]),
                 html.Div(overview.layout(), id="tab-overview"),
                 html.Div(analysis.layout(), id="tab-analysis", style=_HIDE),
