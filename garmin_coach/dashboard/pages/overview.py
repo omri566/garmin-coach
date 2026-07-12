@@ -186,7 +186,8 @@ def kpi_row():
             acwr_color(st.get("acwr")), "acwr"),
         kpi("VO₂max", f"{vo2 or '—'}", "ml/kg/min", figures.VIOLET, "vo2max"),
     ]
-    return dmc.SimpleGrid(cards, cols={"base": 2, "sm": 3, "lg": 5}, spacing="md")
+    return dmc.SimpleGrid(cards, cols={"base": 2, "sm": 3, "lg": 5}, spacing="md",
+                          className="gc-metrics-grid")
 
 
 def last_run_card():

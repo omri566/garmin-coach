@@ -659,16 +659,57 @@ table.mantine-Table-table { font-size: 0.9rem; }
      masthead can never overflow. */
   .gc-sync-status { display: none; }
 
-  /* Plan: one day per row, and drop empty/rest days so it reads as a tight
-     vertical list of the actual sessions instead of a cramped 7-col grid. */
-  .plan-board-grid { grid-template-columns: 1fr !important; }
-  .plan-daycol:has(.plan-empty) { display: none; }
-  .plan-daycol { min-height: auto; }
-  .plan-nav-arrow { width: 34px; height: 34px; font-size: 1rem; }
+  /* Plan week: a horizontal, swipeable strip of day columns — the same board as
+     the desktop, just scrolled sideways (7 columns don't fit a phone at once).
+     The ~150px cards show ~2.5 days so the partial next card signals "swipe for
+     more". Bigger-picture timeline + week arrows are untouched. */
+  .plan-board-grid {
+    display: flex !important; grid-template-columns: none !important;
+    gap: 8px; overflow-x: auto; scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch; padding-bottom: 4px;
+  }
+  .plan-daycol { flex: 0 0 150px; min-height: auto; scroll-snap-align: start; }
+  /* Rest / empty days shrink to a slim column so real sessions dominate — but
+     they stay full-height drop targets so a workout can still be dragged onto
+     them. The date stacks (dow over dom) to read cleanly at this width. */
+  .plan-daycol:has(.plan-empty) { flex: 0 0 58px; }
+  .plan-daycol:has(.plan-empty) .plan-daycol-head {
+    flex-direction: column; align-items: center; gap: 2px; padding: 7px 4px;
+  }
+  /* Slim the scrollbar for this strip so it hints scrollability without bulk. */
+  .plan-board-grid::-webkit-scrollbar { height: 5px; }
+  .plan-board-grid::-webkit-scrollbar-thumb { border-width: 1px; }
+
+  /* Week arrows move BELOW the strip (centred) so the week uses the full width. */
+  .plan-week-nav { flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .plan-week-port { order: -1; flex: 1 1 100%; width: 100%; }
+
+  /* ---- touch targets: ~44px min (Apple HIG / Material) so nothing is a
+     fingertrap ---- */
+  .plan-nav-arrow { width: 44px; height: 44px; font-size: 1.15rem; }
+  .plan-actbtn { padding: 8px 14px; font-size: 0.72rem; }          /* Done / Skip */
+  .gc-recs .mantine-Accordion-control { min-height: 52px; }        /* expand rows */
+  .gc-panel-range .mantine-SegmentedControl-label { padding: 9px 15px; }  /* 3M/1Y/5Y */
 
   /* Wide tables scroll horizontally instead of blowing out the page width. */
   .gc-card table, .mantine-Table-root { display: block; overflow-x: auto; }
 
+  /* ---- charts: touch-friendly ---- */
   /* Give charts a little more height so labels stay legible when narrow. */
   .js-plotly-plot { min-height: 260px; }
+  /* Let a vertical swipe scroll the page instead of the chart capturing it as a
+     pan/zoom gesture — the #1 fix for janky scrolling past inline charts. */
+  .js-plotly-plot .nsewdrag,
+  .js-plotly-plot .draglayer { touch-action: pan-y !important; }
+  /* Progressive disclosure: drop the fiddly draggable range-slider on phones.
+     The 3M/1Y/5Y buttons cover range selection and ⤢ enlarge gives full detail —
+     the slider is just a fingertrap at this size. */
+  .js-plotly-plot .rangeslider-container { display: none !important; }
+
+  /* KEY METRICS: two equal-width cards per row; the lone 5th card centres in its
+     row instead of sitting awkwardly in the left column. */
+  .gc-metrics-grid {
+    display: flex !important; flex-wrap: wrap; justify-content: center; gap: 12px;
+  }
+  .gc-metrics-grid > * { flex: 0 0 calc(50% - 6px); }
 }
