@@ -517,6 +517,9 @@ html, body {
 }
 
 /* ---- tables ---- */
+/* horizontal scroller wrapper (per-km splits) — natural-width table that
+   scrolls sideways rather than cramming columns; see the phone rules below. */
+.gc-tablescroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table.mantine-Table-table { font-size: 0.9rem; }
 .mantine-Table-th {
   font-family: 'JetBrains Mono', monospace !important;
@@ -712,4 +715,45 @@ table.mantine-Table-table { font-size: 0.9rem; }
     display: flex !important; flex-wrap: wrap; justify-content: center; gap: 12px;
   }
   .gc-metrics-grid > * { flex: 0 0 calc(50% - 6px); }
+
+  /* Deep Analysis run header: 3 tight cells per row → exactly 2 rows, so Load no
+     longer strands alone on a third row. */
+  .gc-runhead .cell {
+    flex: 1 1 30%; min-width: 0; box-sizing: border-box; padding: 10px 8px;
+  }
+  .gc-runhead .cell:nth-child(3n) { border-right: none; }
+  /* Keep each value (e.g. the 10-char date) on one line; size it to fit the
+     narrower 3-per-row cell. */
+  .gc-runhead .v { white-space: nowrap; font-size: 0.95rem; }
+
+  /* Per-km splits: give every column real room and let the table take its
+     natural width inside a horizontal scroller, instead of cramming 6 columns
+     into the card. Roomier rows + bigger type make it scannable; you swipe to
+     reach V.ratio / Elev. */
+  .gc-tablescroll table { width: max-content !important; min-width: 100%; }
+  .gc-tablescroll td, .gc-tablescroll th {
+    padding: 11px 10px !important; font-size: 0.92rem !important;
+    white-space: nowrap; min-width: 78px; text-align: right;
+  }
+  .gc-tablescroll td:first-child, .gc-tablescroll th:first-child {
+    min-width: 38px; text-align: left;
+  }
+
+  /* Fullscreen chart opens in landscape: the modal goes edge-to-edge and the
+     enlarged graph is rotated 90° (dimensions swapped) so it fills the screen
+     when the phone is turned sideways. */
+  .mantine-Modal-content {
+    width: 100vw !important; max-width: 100vw !important;
+    height: 100dvh !important; max-height: 100dvh !important;
+    margin: 0 !important; border-radius: 0 !important; overflow: hidden;
+  }
+  .mantine-Modal-body {
+    height: calc(100dvh - 56px); padding: 0; overflow: visible;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #gc-modal-graph {
+    width: calc(100dvh - 84px) !important;   /* → on-screen HEIGHT after rotate */
+    height: 94vw !important;                  /* → on-screen WIDTH after rotate  */
+    transform: rotate(90deg);
+  }
 }
