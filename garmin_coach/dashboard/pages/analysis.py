@@ -89,8 +89,9 @@ def splits_table(df) -> dmc.Card:
                                ["Km", "Pace", "HR", "Cad", "V.ratio", "Elev"]]))
     return dmc.Card([
         dmc.Text("Per-kilometre splits", fw=600, mb=6),
-        dmc.Table([head, html.Tbody(rows)], striped=True, highlightOnHover=True,
-                  withTableBorder=False),
+        html.Div(dmc.Table([head, html.Tbody(rows)], striped=True,
+                           highlightOnHover=True, withTableBorder=False),
+                 className="gc-tablescroll"),
     ], **CARD)
 
 
