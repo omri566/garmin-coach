@@ -43,8 +43,8 @@ html, body {
 
 /* ---- masthead ---- */
 .gc-mast {
-  display: flex; align-items: baseline; justify-content: space-between;
-  padding: 26px 0 18px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 26px 0 18px;
 }
 .gc-wordmark {
   font-weight: 800; font-size: 1.18rem; letter-spacing: -0.01em;
@@ -633,8 +633,31 @@ table.mantine-Table-table { font-size: 0.9rem; }
 
 /* ============ phones (narrow screens) ============ */
 @media (max-width: 640px) {
-  .gc-shell { padding-left: 12px; padding-right: 12px; }
-  .gc-nav { flex-wrap: wrap; gap: 10px; }
+  .gc-shell { padding-left: 12px; padding-right: 12px; padding-bottom: 80px; }
+
+  /* Primary nav → fixed bottom tab bar (thumb-reachable, iOS-style). Equal-width
+     segments so the three tabs read perfectly symmetric across the screen. */
+  .gc-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+    margin: 0; padding: 6px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--ink-2); border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
+  }
+  .gc-nav .mantine-SegmentedControl-root { display: flex; width: 100%; gap: 0; }
+  .gc-nav .mantine-SegmentedControl-control { flex: 1 1 0; min-width: 0; }
+  .gc-nav .mantine-SegmentedControl-label {
+    display: flex; align-items: center; justify-content: center;
+    margin-right: 0; padding: 11px 4px; text-align: center; white-space: nowrap;
+    font-size: 0.72rem; letter-spacing: 0.02em;
+    border-bottom: none; border-top: 2px solid transparent;
+  }
+  .gc-nav .mantine-SegmentedControl-label[data-active] {
+    color: var(--amp); border-bottom: none; border-top-color: var(--amp);
+  }
+
+  /* Sync stays compact top-right; hide its verbose status text on phones so the
+     masthead can never overflow. */
+  .gc-sync-status { display: none; }
 
   /* Plan: one day per row, and drop empty/rest days so it reads as a tight
      vertical list of the actual sessions instead of a cramped 7-col grid. */
