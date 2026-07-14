@@ -124,6 +124,29 @@ def test_off_day_run_still_attaches_to_nearest_open_session(add_metric):
     assert by_day["Wed"]["note"] is not None and "ran" in by_day["Wed"]["note"]
 
 
+def test_session_matches_main_run_not_same_day_strides(add_metric):
+    """Two runs on one day: the session anchors to the main workout, not strides.
+
+    The athlete logs a short strides set as a separate activity. Regardless of
+    which run was started (or synced) first, the 5 km session run — not the
+    0.5 km strides — must satisfy the day's session; the strides are an extra
+    and must not spill onto another day's open session either.
+    """
+    # Strides logged *first* (and even synced first) — the pre-fix greedy pass
+    # would have handed Wednesday's session to it.
+    strides = add_metric("2026-06-24T07:30:00", distance_m=500.0)
+    main = add_metric("2026-06-24T08:00:00", distance_m=5000.0)
+    sched = schedule.build_schedule(base_plan(), today=TODAY)
+    week = sched["weeks"][0]
+    by_day = _by_day(sched)
+    wed = by_day["Wed"]
+    assert wed["status"] == "done"
+    assert wed["match"]["activity_id"] == main
+    # The strides are an extra, and they did NOT drift onto the open Sat session.
+    assert by_day["Sat"]["status"] != "done"
+    assert any(r["activity_id"] == strides for r in week["extras"])
+
+
 # --- 2. manual done/skip toggle persists ------------------------------------
 
 

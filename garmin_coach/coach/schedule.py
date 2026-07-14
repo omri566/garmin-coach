@@ -89,6 +89,17 @@ def _runs_between(start: dt.date, end: dt.date) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _run_significance(run: dict) -> tuple[float, float]:
+    """How 'primary' a run is — greatest distance wins, stress breaks ties.
+
+    Distinguishes the day's main workout from short supplementary runs the
+    athlete logs separately (strides, a warm-up jog, a second easy shakeout):
+    a 5 km session run outranks a 0.5 km strides run, so the session anchors to
+    the real workout and the strides stay an extra.
+    """
+    return (run.get("distance_m") or 0.0, run.get("training_stress") or 0.0)
+
+
 def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
     """Link completed runs to the planned sessions they satisfy.
 
@@ -96,32 +107,37 @@ def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
     date), never to the day it happened to be synced. Matching runs in two
     passes so a late-synced run can't drift onto a neighbouring day:
 
-      1. Same-day — a run lands on (and is attributed to) the non-rest session
-         planned for its own day. This holds even when the athlete already marked
-         that day done/skipped: the run is *consumed* and *recorded* on its own
-         day so it can never spill onto another session (the
-         late-sync-matched-the-wrong-day bug) and both the plan view and the
-         overview see the same run→session link.
-      2. Nearest — a run with no session on its own day attaches to the closest
-         still-open non-rest session in the week ("did the workout a day
+      1. Same-day — the non-rest session planned for a day claims the *most
+         significant* run performed that day (greatest distance; see
+         `_run_significance`), so a day with a main workout plus a short strides
+         run logged separately anchors the session to the real workout, not the
+         strides. This holds even when the athlete already marked that day
+         done/skipped: the run is *consumed* and *recorded* on its own day so it
+         can never spill onto another session (the late-sync-matched-the-wrong-day
+         bug) and both the plan view and the overview see the same run→session
+         link. Smaller same-day siblings (strides, doubles) are recorded as
+         extras rather than spread onto other days' open sessions.
+      2. Nearest — a run whose day had *no* planned session attaches to the
+         closest still-open non-rest session in the week ("did the workout a day
          early/late"), preferring an upcoming session on a tie.
 
     Returns the runs that found no slot (genuine extras). Sessions the athlete
     manually marked done/skipped are never auto-matched over.
     """
     non_rest = [s for s in sessions if (s["type"] or "").lower() != "rest"]
-    used: set[int] = set()
-    leftover: list[dict] = []
+    session_days = {s["date"] for s in non_rest}
+    used_runs: set[int] = set()
 
-    # Pass 1: anchor each run to a session on the exact day it was run.
-    for run in runs:
-        rdate = _run_date(run["start_time"])
-        same_day = next((s for s in non_rest
-                         if s["date"] == rdate and id(s) not in used), None)
-        if same_day is None:
-            leftover.append(run)
+    # Pass 1: each session claims the primary run performed on its own day.
+    # Iterating session-first (not run-first) means the biggest run wins the
+    # slot regardless of the order the runs were started or synced.
+    for s in non_rest:
+        cands = [r for r in runs
+                 if id(r) not in used_runs and _run_date(r["start_time"]) == s["date"]]
+        if not cands:
             continue
-        used.add(id(same_day))
+        primary = max(cands, key=_run_significance)
+        used_runs.add(id(primary))
         # Attribute the run to its own-day session even when that day was
         # manually marked done/skipped. The run genuinely happened there, so the
         # attribution (`match`) is a *fact* independent of the manual status:
@@ -130,17 +146,26 @@ def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
         # Recording the match here is the single source of truth that lets the
         # overview recognise the run as planned instead of flagging it an
         # "extra" — without it the overview and the plan view disagree.
-        same_day["match"] = run
-        same_day["match_date"] = rdate
+        s["match"] = primary
+        s["match_date"] = s["date"]
+
+    # Split the unmatched runs: those on a day that *had* a session are
+    # supplementary (strides/doubles) and become extras directly — only runs on
+    # a day with no planned session compete for the nearest open slot below.
+    extras: list[dict] = []
+    leftover: list[dict] = []
+    for run in runs:
+        if id(run) in used_runs:
+            continue
+        (extras if _run_date(run["start_time"]) in session_days else leftover).append(run)
 
     # Pass 2: runs with no same-day session attach to the nearest open session.
     slots = [s for s in non_rest
-             if id(s) not in used
+             if s.get("match") is None
              and s.get("status_override") not in ("done", "skipped")]
-    extras: list[dict] = []
     for run in leftover:
         rdate = _run_date(run["start_time"])
-        cands = [s for s in slots if id(s) not in used]
+        cands = [s for s in slots if s.get("match") is None]
         if not cands:
             extras.append(run)
             continue
@@ -150,7 +175,6 @@ def _automatch(sessions: list[dict], runs: list[dict]) -> list[dict]:
                                          0 if s["date"] >= rdate else 1))
         best["match"] = run
         best["match_date"] = rdate
-        used.add(id(best))
     return extras
 
 
