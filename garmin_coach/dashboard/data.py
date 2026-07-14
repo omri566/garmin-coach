@@ -260,3 +260,10 @@ def last_run() -> dict | None:
     summary = json.loads(a["raw_json"]) if a and a["raw_json"] else {}
     d["name"] = summary.get("activityName") or "Run"
     return d
+
+
+def coach_avatar() -> str | None:
+    """The athlete's uploaded coach-avatar image as a data-URI, or None to fall
+    back to the default emoji. Stored in the shared plan preferences file."""
+    from garmin_coach.coach import plan as plan_mod
+    return plan_mod.load_prefs().get("avatar_data") or None

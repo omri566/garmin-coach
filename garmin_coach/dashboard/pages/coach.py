@@ -1,8 +1,11 @@
-"""Coach tab — science-backed recommendations + goal-driven plan (you-in-the-loop).
+"""Training Plan tab — the goal-driven plan and its execution (you-in-the-loop).
 
-Displays the latest saved recommendation/plan, and lets the athlete regenerate
-them on demand (each runs the LLM over current data — a slow call, wrapped in a
-loading spinner).
+Shows the active plan: a progress hero, today's/next session, milestones, the
+week board (drag to reschedule, Done/Skip to log), and the macro timeline. Plan
+settings (goal / race date / preferred days / generate) live in the Settings
+drawer (`pages/settings.py`); coaching tips live in the floating coach popup
+(`pages/tips.py`). Those modules reuse `render_plan`/`render_boards`/`_week_track`
+from here, so keep them importable.
 """
 from __future__ import annotations
 
@@ -11,165 +14,17 @@ import re
 
 import dash_mantine_components as dmc
 from dash import (ALL, ClientsideFunction, Input, Output, State, callback,
-                  clientside_callback, ctx, dcc, html, no_update)
+                  clientside_callback, ctx, dcc, html)
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
-from garmin_coach.coach import recommend as rec_mod
 from garmin_coach.coach import schedule
 from garmin_coach.dashboard import data, figures
 from garmin_coach.dashboard.ui import CARD, fmt_pace, section
-from garmin_coach.knowledge import kb
-
-PRIORITY_COLOR = {"high": "red", "medium": "orange", "low": "gray"}
-PRIORITY_HEX = {"high": figures.RED, "medium": figures.ORANGE, "low": figures.MUTED}
-PRIORITY_LABEL = {"high": "Do first", "medium": "Soon", "low": "Optional"}
-_DAYS_SUN_FIRST = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
 def _empty(msg):
     return dmc.Card(dmc.Text(msg, c="dimmed"), **CARD)
-
-
-# Split a free-text flag into a short bold topic + the detail that follows.
-_FLAG_LEAD = re.compile(r"^(.{3,46}?)(?::\s|\s[—–-]\s)(.+)$", re.S)
-
-
-_FLAG_STOP = {"on", "the", "and", "with", "of", "in", "a", "to", "is", "are",
-              "at", "for", "that", "but", "so", "as", "by", "from", "signals", "mean"}
-
-
-def _flag_parts(text):
-    text = text.strip()
-    m = _FLAG_LEAD.match(text)
-    if m:
-        return m.group(1).strip(" .,:—–-"), m.group(2).strip()
-    # No clean delimiter: take leading words up to the first filler word (max 4).
-    words = text.split()
-    lead = [words[0]]
-    for w in words[1:4]:
-        if w.lower().strip(".,") in _FLAG_STOP:
-            break
-        lead.append(w)
-    return " ".join(lead), " ".join(words[len(lead):])
-
-
-def _flag_row(text):
-    lead, rest = _flag_parts(text)
-    body = [html.B(lead)]
-    if rest:
-        body.append(" — " + rest)
-    return html.Div([
-        html.Span(className="dot"),
-        html.Div(body, className="txt"),
-    ], className="gc-flag")
-
-
-def _short_title(title: str) -> str:
-    """Lead with the concrete gist; the '— reason' / '(detail)' tail is repeated
-    in the expanded rationale, so drop it from the scannable one-line title."""
-    lead = re.split(r"\s[—–-]\s|\s*\(", title, maxsplit=1)[0].strip()
-    return lead or title
-
-
-def _watchout_chips(flags):
-    """Watch-outs as compact pills (topic only); the detail shows on hover, so the
-    section reads at a glance instead of as five dense sentences."""
-    chips = []
-    for f in flags:
-        lead, rest = _flag_parts(f)
-        chip = dmc.Badge("⚠ " + lead, color="orange", variant="light", size="sm",
-                         className="gc-watch-chip")
-        chips.append(dmc.Tooltip(chip, label=rest, multiline=True, w=300,
-                                 withArrow=True, openDelay=120, position="top")
-                     if rest else chip)
-    return dmc.Group(chips, gap="xs")
-
-
-_INSIGHT_ICON = {"time_of_day": "🕑", "late_sleep": "😴", "sleep_perf": "😴",
-                 "rest_rebound": "🛌", "cadence": "🦶", "readiness": "⚡",
-                 "hrv": "💓", "resting_hr": "❤️"}
-
-
-def _insights_blocks():
-    """A scannable 'what your data shows' section, or [] if no pattern is strong
-    enough — every insight is derived from the athlete's own numbers."""
-    try:
-        insights = data.personal_insights()
-    except Exception:  # noqa: BLE001 — insights are a nicety, never break the tab
-        insights = []
-    if not insights:
-        return []
-    cards = [dmc.Card([
-        dmc.Group([html.Span(_INSIGHT_ICON.get(ins["kind"], "📈"),
-                             className="gc-insight-ic"),
-                   dmc.Text(ins["title"], fw=700, size="sm")], gap="sm", wrap="nowrap"),
-        dmc.Text(ins["detail"], size="sm", c="dimmed", style={"lineHeight": 1.5}),
-    ], className="gc-card", radius="md", p="md") for ins in insights]
-    return [section("What your data shows about you"),
-            dmc.SimpleGrid(cards, cols={"base": 1, "md": 2}, spacing="md")]
-
-
-def render_recs(rec):
-    insights = _insights_blocks()
-    if not rec:
-        empty = _empty("No recommendations yet — click “Refresh recommendations”.")
-        return dmc.Stack([*insights, empty], gap="md") if insights else empty
-    items = []
-    for i, r in enumerate(rec.get("recommendations", [])):
-        accent = PRIORITY_HEX.get(r["priority"], figures.MUTED)
-        # Collapsed row: priority · when · short title — one scannable line.
-        control = dmc.AccordionControl(dmc.Group([
-            dmc.Badge(PRIORITY_LABEL.get(r["priority"], r["priority"]),
-                      color=PRIORITY_COLOR.get(r["priority"], "gray"),
-                      variant="light", size="sm", w=92),
-            dmc.Text(_short_title(r["title"]), fw=600, size="sm", lineClamp=1),
-            dmc.Badge(r["horizon"].replace("_", " "), variant="outline",
-                      color="gray", size="xs"),
-        ], gap="sm", align="center", wrap="nowrap"))
-        # Expanded: the one action first (inverted pyramid), then why, then cites.
-        panel = dmc.AccordionPanel(dmc.Stack([
-            dmc.Text(r["action"], className="gc-rec-action",
-                     style={"color": accent}),
-            dmc.Text(r["rationale"], size="sm", c="dimmed",
-                     style={"lineHeight": 1.6}),
-            *([dmc.Text("Based on · " + "; ".join(r["citations"]), size="xs",
-                        c="dimmed", fs="italic")] if r.get("citations") else []),
-        ], gap=8))
-        items.append(dmc.AccordionItem([control, panel], value=str(i),
-                     style={"--accent": accent}))
-    actions = html.Div(
-        dmc.Accordion(items, multiple=True, chevronPosition="right", variant="filled"),
-        className="gc-recs")
-
-    # Assessment: lead with the first sentence only; the rest is one tap away.
-    text = (rec.get("assessment", "") or "").strip()
-    bits = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)
-    headline, rest = (bits[0] if bits else text), (bits[1] if len(bits) > 1 else "")
-    head = [
-        dmc.Group([
-            dmc.Text("How you're doing", fw=700, size="md"),
-            dmc.Text(f"updated {rec.get('generated_at','')[:10]}",
-                     size="xs", c="dimmed", className="mono"),
-        ], justify="space-between"),
-        dmc.Text(headline, className="gc-assessment-lead", mt=8),
-    ]
-    if rest:
-        head.append(dmc.Spoiler(
-            showLabel="Read full assessment", hideLabel="Show less", maxHeight=0,
-            children=dmc.Text(rest, className="gc-assessment"), mt=2))
-    flags = rec.get("flags", [])
-    if flags:
-        head.append(html.Div([
-            html.Div("Watch-outs", className="gc-flags-lab"),
-            _watchout_chips(flags),
-        ], className="gc-flags"))
-    return dmc.Stack([
-        dmc.Card(head, className="gc-console", p="lg"),
-        *insights,
-        section("Your focus right now"),
-        actions,
-    ], gap="md")
 
 
 TYPE_COLOR = {"easy": "teal", "long": "blue", "tempo": "orange",
@@ -530,8 +385,8 @@ def _macro_timeline(plan, today):
 
 def render_plan(plan):
     if not plan:
-        return _empty("No plan yet — open ⚙ Plan settings above, set a goal, "
-                      "and click Generate plan.")
+        return _empty("No plan yet — open ⚙ Settings, set a goal under Plan "
+                      "settings, and click Generate plan.")
     sched = schedule.build_schedule(plan)
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
@@ -551,112 +406,10 @@ def render_plan(plan):
     ], gap="md")
 
 
-def _settings_panel():
-    kb_doc = kb.load_kb()
-    kb_note = (f"Knowledge base v{kb_doc['version']} · {len(kb_doc['entries'])} cited topics"
-               if kb_doc else "Knowledge base not built yet — run the research pass.")
-    latest = plan_mod.load_latest() or {}
-    pref_days = (plan_mod.load_prefs().get("preferred_days")
-                 or latest.get("preferred_days") or [])
-    day_picker = dmc.Stack([
-        dmc.Text("Preferred running days", size="sm", fw=600),
-        dmc.Text("Pick your usual days, then apply them to your current plan "
-                 "(no need to regenerate). You can still drag any session to move "
-                 "it for a specific week.", size="xs", c="dimmed"),
-        dmc.ChipGroup(
-            dmc.Group([dmc.Chip(d, value=d, size="sm") for d in _DAYS_SUN_FIRST],
-                      gap="xs", mt=4),
-            id="coach-days", value=pref_days, multiple=True),
-        dmc.Group([
-            dmc.Button("Apply to current plan", id="coach-days-apply",
-                       variant="light", size="xs"),
-            html.Span(id="coach-days-status", className="plan-save-status"),
-        ], gap="sm", align="center"),
-    ], gap=4)
-    body = dmc.Stack([
-        dmc.Group([
-            dmc.TextInput(id="coach-goal", placeholder="e.g. sub-50 10k", w=260,
-                          label="Race goal", value=latest.get("goal", "")),
-            dmc.TextInput(id="coach-date", placeholder="YYYY-MM-DD", w=180,
-                          label="Race date", value=latest.get("goal_date", "") or ""),
-            dmc.Button("Generate plan", id="coach-plan-btn", mt=22),
-            dmc.Button("Refresh coaching tips", id="coach-rec-btn",
-                       variant="default", mt=22),
-        ], gap="sm", align="end"),
-        day_picker,
-        dmc.Text(kb_note, size="xs", c="dimmed", className="mono"),
-    ], gap="sm")
-    return dmc.Accordion(
-        chevronPosition="right", variant="separated", className="gc-recs",
-        children=[dmc.AccordionItem([
-            dmc.AccordionControl(dmc.Group([
-                dmc.Text("⚙  Plan settings", fw=600, size="sm"),
-                dmc.Text("set your goal · regenerate your plan or tips",
-                         size="xs", c="dimmed"),
-            ], gap="sm")),
-            dmc.AccordionPanel(body, pt="sm"),
-        ], value="settings")])
-
-
 def layout():
-    return dmc.Stack([
-        _settings_panel(),
-        dmc.Tabs([
-            dmc.TabsList([
-                dmc.TabsTab("My plan", value="plan"),
-                dmc.TabsTab("Coaching tips", value="recs"),
-            ]),
-            dmc.TabsPanel(dcc.Loading(html.Div(render_plan(plan_mod.load_latest()),
-                                               id="coach-plan"), delay_show=400),
-                          value="plan", pt="md"),
-            dmc.TabsPanel(dcc.Loading(html.Div(render_recs(rec_mod.load_latest()),
-                                               id="coach-recs")), value="recs", pt="md"),
-        ], value="plan"),
-    ], gap="md")
-
-
-@callback(Output("coach-recs", "children"), Input("coach-rec-btn", "n_clicks"),
-          prevent_initial_call=True)
-def _refresh_recs(_n):
-    return render_recs(rec_mod.recommend())
-
-
-@callback(Output("coach-plan", "children"), Input("coach-plan-btn", "n_clicks"),
-          State("coach-goal", "value"), State("coach-date", "value"),
-          State("coach-days", "value"), prevent_initial_call=True)
-def _make_plan(_n, goal, date, days):
-    if not goal:
-        return _empty("Enter a goal first.")
-    ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
-    return render_plan(plan_mod.make_plan(goal, goal_date=date or None,
-                                          preferred_days=ordered))
-
-
-@callback(Output("coach-days-status", "children", allow_duplicate=True),
-          Input("coach-days", "value"), prevent_initial_call=True)
-def _save_days(days):
-    ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
-    plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
-    return "Saved — click Apply to update your plan" if ordered else "Cleared"
-
-
-@callback(Output("plan-board", "children", allow_duplicate=True),
-          Output("plan-week-body", "children", allow_duplicate=True),
-          Output("coach-days-status", "children", allow_duplicate=True),
-          Input("coach-days-apply", "n_clicks"),
-          State("coach-days", "value"), State("plan-week-view", "data"),
-          prevent_initial_call=True)
-def _apply_days(_n, days, viewed):
-    ordered = [d for d in _DAYS_SUN_FIRST if d in (days or [])]
-    if not ordered:                       # fall back to the persisted selection
-        ordered = plan_mod.load_prefs().get("preferred_days") or []
-    plan = plan_mod.load_latest()
-    if not plan or not ordered:
-        return no_update, no_update, "Pick at least one day first."
-    plan_mod.save_prefs({**plan_mod.load_prefs(), "preferred_days": ordered})
-    plan = plan_mod.apply_preferred_days(plan, ordered)
-    return (render_boards(plan), _week_track(plan, _view_idx(viewed)),
-            "Applied to your plan ✓")
+    return dcc.Loading(
+        html.Div(render_plan(plan_mod.load_latest()), id="coach-plan"),
+        delay_show=400)
 
 
 # Arrow nav is entirely client-side: slide the pre-rendered carousel (transform)
@@ -676,9 +429,9 @@ clientside_callback(
     Input("plan-week-body", "children"),
     State("plan-week-view", "data"))
 
-# The carousel lives on the Coach tab, which is display:none until selected — so
-# the viewport height can't be measured until then. Re-apply once the tab's own
-# style flips to visible (this fires after the show, unlike the tab value).
+# The carousel lives on the Training Plan tab, which is display:none until
+# selected — so the viewport height can't be measured until then. Re-apply once
+# the tab's own style flips to visible (this fires after the show).
 clientside_callback(
     ClientsideFunction(namespace="gcplan", function_name="onTab"),
     Output("plan-anim-dummy", "data", allow_duplicate=True),

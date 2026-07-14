@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from garmin_coach import config
@@ -20,6 +20,12 @@ from garmin_coach.store import db
 log = logging.getLogger(__name__)
 
 PROFILE_PATH = config.DATA_DIR / "profile.json"
+# Manual edits (from Settings) live in a separate file layered *on top* of the
+# Garmin-fetched base, so a nightly profile re-fetch (save_profile) never clobbers
+# what the athlete typed. Only these fields may be overridden by hand.
+OVERRIDES_PATH = config.DATA_DIR / "profile_overrides.json"
+EDITABLE_FIELDS = ("age", "sex", "height_cm", "weight_kg", "resting_hr",
+                   "hr_max", "lthr", "vo2max")
 
 
 @dataclass
@@ -133,13 +139,39 @@ def save_profile(p: Profile) -> None:
     PROFILE_PATH.write_text(json.dumps(asdict(p), indent=2))
 
 
+def load_overrides() -> dict[str, Any]:
+    """Manual profile edits (Settings), or {} if none saved yet."""
+    if not OVERRIDES_PATH.exists():
+        return {}
+    try:
+        return json.loads(OVERRIDES_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_overrides(overrides: dict[str, Any]) -> None:
+    """Persist manual edits, keeping only recognised editable fields with a value.
+    Fields set to None/'' are dropped, so clearing a field reverts it to Garmin's."""
+    config.ensure_dirs()
+    clean = {k: v for k, v in overrides.items()
+             if k in EDITABLE_FIELDS and v not in (None, "")}
+    OVERRIDES_PATH.write_text(json.dumps(clean, indent=2))
+
+
+_PROFILE_FIELDS = {f.name for f in fields(Profile)}
+
+
 def load_profile() -> Profile:
-    if not PROFILE_PATH.exists():
+    base: dict[str, Any] = (json.loads(PROFILE_PATH.read_text())
+                            if PROFILE_PATH.exists() else {})
+    overrides = {k: v for k, v in load_overrides().items()
+                 if k in EDITABLE_FIELDS and v not in (None, "")}
+    if not base and not overrides:
         raise FileNotFoundError(
             f"No profile at {PROFILE_PATH}. Run: python -m garmin_coach.profile"
         )
-    data: dict[str, Any] = json.loads(PROFILE_PATH.read_text())
-    return Profile(**data)
+    merged = {**base, **overrides}
+    return Profile(**{k: v for k, v in merged.items() if k in _PROFILE_FIELDS})
 
 
 def main() -> None:
