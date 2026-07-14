@@ -139,24 +139,38 @@ def render_recs(rec, limit=TIP_LIMIT):
     ], gap="md")
 
 
-def drawer():
-    """The coach's tips popup — a right-side drawer, mounted once in the shell."""
-    return dmc.Drawer(
-        id="gc-tips-drawer", position="right", size="min(440px, 94vw)",
-        zIndex=3000, padding="lg", title="Your coach",
-        classNames={"content": "gc-coach-drawer"},
-        children=dmc.Stack([
-            dcc.Loading(html.Div(coach_moments.moment_cards(), id="gc-coach-moments"),
-                        type="dot", color=figures.AMP),
-            html.Div(render_recs(rec_mod.load_latest()), id="coach-recs"),
-            dmc.Button("↻ Refresh tips", id="coach-rec-btn", variant="light",
-                       size="xs", mt="sm"),
-        ], gap="md"),
-    )
+def _tips_body():
+    return dmc.Stack([
+        dcc.Loading(html.Div(coach_moments.moment_cards(), id="gc-coach-moments"),
+                    type="dot", color=figures.AMP),
+        html.Div(render_recs(rec_mod.load_latest()), id="coach-recs"),
+        dmc.Button("↻ Refresh tips", id="coach-rec-btn", variant="light",
+                   size="xs", mt="sm"),
+    ], gap="md")
+
+
+def popover():
+    """The coach button + its floating tips popup (mounted once in the shell).
+
+    Tips 'pop' from the coach (a Popover anchored to the avatar) instead of
+    sliding in a full-height drawer. The button is the Popover target; the app
+    shell wraps this in a draggable dock so the whole thing can be moved."""
+    from garmin_coach.dashboard.pages import settings
+    fab = html.Button(settings.fab_content(data.coach_avatar()),
+                      id="gc-coach-fab", n_clicks=0, className="gc-coach-fab",
+                      **{"aria-label": "Coaching tips"})
+    return dmc.Popover(
+        id="gc-tips-popover", opened=False, position="top-end", withArrow=True,
+        arrowSize=12, shadow="xl", width=360, zIndex=3000, radius="lg", offset=14,
+        closeOnClickOutside=True, closeOnEscape=True,
+        children=[
+            dmc.PopoverTarget(fab),
+            dmc.PopoverDropdown(_tips_body(), className="gc-tips-pop"),
+        ])
 
 
 @callback(Output("gc-coach-moments", "children"),
-          Input("gc-tips-drawer", "opened"), prevent_initial_call=True)
+          Input("gc-tips-popover", "opened"), prevent_initial_call=True)
 def _fill_moments(opened):
     """When the coach popup opens, generate any missing moments (cached) and show
     them. Generation is one-time per run/block, so repeat opens are instant."""

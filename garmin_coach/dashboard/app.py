@@ -13,14 +13,12 @@ import datetime as dt
 
 import dash
 import dash_mantine_components as dmc
-from dash import (ALL, Input, Output, State, _dash_renderer, callback, ctx, dcc,
-                  html)
+from dash import ALL, Input, Output, State, _dash_renderer, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from garmin_coach import config
-from garmin_coach.dashboard import data, figures, ui
-from garmin_coach.dashboard.pages import (analysis, coach, onboarding, overview,
-                                          settings, tips)
+from garmin_coach.dashboard import figures, ui
+from garmin_coach.dashboard.pages import analysis, coach, onboarding, overview, settings, tips
 from garmin_coach.setup import state as setup_state
 from garmin_coach.store import db
 
@@ -100,11 +98,10 @@ def _shell_inner():
                 html.Div(coach.layout(), id="tab-coach", style=_HIDE),
                 _chart_modal(),
                 # Global overlays (outside the tabs, so their ids always exist):
-                # the floating coach button + its tips popup, and Settings.
-                html.Button(settings.fab_content(data.coach_avatar()),
-                            id="gc-coach-fab", n_clicks=0, className="gc-coach-fab",
-                            **{"aria-label": "Coaching tips"}),
-                tips.drawer(),
+                # the movable floating coach + its tips popover (dragged via the
+                # dock; see assets/coach_fab.js), and the Settings drawer.
+                html.Div(tips.popover(), id="gc-coach-dock",
+                         className="gc-coach-dock"),
                 settings.drawer(),
             ]),
         )
@@ -181,10 +178,10 @@ def switch_tab(tab):
             _SHOW if tab == "coach" else _HIDE)
 
 
-@callback(Output("gc-tips-drawer", "opened"), Input("gc-coach-fab", "n_clicks"),
-          prevent_initial_call=True)
-def _open_tips(_n):
-    return True
+@callback(Output("gc-tips-popover", "opened"), Input("gc-coach-fab", "n_clicks"),
+          State("gc-tips-popover", "opened"), prevent_initial_call=True)
+def _open_tips(_n, opened):
+    return not opened
 
 
 @callback(Output("gc-settings-drawer", "opened"), Input("gc-settings-btn", "n_clicks"),

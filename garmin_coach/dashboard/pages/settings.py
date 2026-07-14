@@ -1,17 +1,17 @@
 """Settings drawer — a growing surface for athlete-controlled configuration.
 
-v1 sections:
+Sections (each a collapsed accordion item):
   * Profile — height/weight/HR anchors etc., saved as manual overrides that win
     over Garmin's nightly re-fetch (`profile.save_overrides`).
-  * Coach avatar — upload your own image (stored as a data-URI in prefs); it
-    becomes the floating coach button on every screen.
+  * Coach avatar — pick one of the bundled images under assets/avatars/
+    (stored as prefs['avatar_preset']); it becomes the floating coach on-screen.
   * Plan settings — goal / race date / preferred days / generate plan (relocated
     from the old Coach tab; the component ids and their callbacks are unchanged).
 """
 from __future__ import annotations
 
 import dash_mantine_components as dmc
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
+from dash import ALL, Input, Output, State, callback, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
 from garmin_coach import profile as prof
@@ -51,9 +51,9 @@ def _profile_section():
         id={"type": "gc-prof", "field": "sex"}, label="Sex",
         value=(vals.get("sex") or None), data=["MALE", "FEMALE"], w=150, size="sm"))
     return dmc.Stack([
-        dmc.Text("Profile", fw=700, size="sm"),
-        dmc.Text("Your physiological anchors. Edits here override Garmin and stick "
-                 "through the next sync. Leave a field blank to use Garmin's value.",
+        dmc.Text("Your physiological anchors — resting/max/threshold HR and VO₂max "
+                 "included. Edits override Garmin and stick through the next sync; "
+                 "leave a field blank to use Garmin's value.",
                  size="xs", c="dimmed"),
         dmc.Group(inputs, gap="sm"),
         dmc.Group([
@@ -63,25 +63,35 @@ def _profile_section():
     ], gap="sm")
 
 
-def avatar_preview(src):
-    if src:
-        return html.Img(src=src, className="gc-avatar-preview")
-    return html.Div("🧑‍🏫", className="gc-avatar-preview gc-avatar-empty")
+def _active_avatar_name(avail):
+    """Which bundled avatar is currently selected (falls back to the default)."""
+    chosen = plan_mod.load_prefs().get("avatar_preset")
+    if chosen in avail:
+        return chosen
+    cur = data.coach_avatar()
+    return cur.rsplit("/", 1)[-1] if cur else None
+
+
+def _avatar_thumb(name, selected):
+    return html.Button(
+        html.Img(src=data.avatar_url(name), className="gc-avatar-thumb-img"),
+        id={"type": "gc-avatar-pick", "name": name}, n_clicks=0,
+        className="gc-avatar-thumb" + (" selected" if selected else ""))
+
+
+def _avatar_gallery(avail, active):
+    return html.Div([_avatar_thumb(n, n == active) for n in avail],
+                    id="gc-avatar-gallery", className="gc-avatar-gallery")
 
 
 def _avatar_section():
-    src = data.coach_avatar()
+    avail = data.available_avatars()
+    if not avail:
+        return dmc.Text("No coach images bundled yet — drop pictures into "
+                        "dashboard/assets/avatars/.", size="xs", c="dimmed")
     return dmc.Stack([
-        dmc.Text("Coach avatar", fw=700, size="sm"),
-        dmc.Text("Upload an image for your coach — it becomes the button you tap "
-                 "for tips.", size="xs", c="dimmed"),
-        dmc.Group([
-            html.Div(avatar_preview(src), id="gc-avatar-preview"),
-            dcc.Upload(dmc.Button("Upload image", variant="light", size="xs"),
-                       id="gc-avatar-upload", accept="image/*", multiple=False),
-            dmc.Button("Remove", id="gc-avatar-remove", variant="subtle",
-                       color="gray", size="xs"),
-        ], gap="sm", align="center"),
+        dmc.Text("Pick your coach — tap an image.", size="xs", c="dimmed"),
+        _avatar_gallery(avail, _active_avatar_name(avail)),
         html.Span(id="gc-avatar-status", className="plan-save-status"),
     ], gap="sm")
 
@@ -109,7 +119,6 @@ def _plan_settings_section():
         ], gap="sm", align="center"),
     ], gap=4)
     return dmc.Stack([
-        dmc.Text("Plan settings", fw=700, size="sm"),
         dmc.Group([
             dmc.TextInput(id="coach-goal", placeholder="e.g. sub-50 10k", w=220,
                           label="Race goal", value=latest.get("goal", "")),
@@ -122,18 +131,33 @@ def _plan_settings_section():
     ], gap="sm")
 
 
+def _acc_item(value, title, subtitle, body):
+    return dmc.AccordionItem([
+        dmc.AccordionControl(dmc.Group([
+            dmc.Text(title, fw=700, size="sm"),
+            dmc.Text(subtitle, size="xs", c="dimmed"),
+        ], gap="sm")),
+        dmc.AccordionPanel(body, pt="sm"),
+    ], value=value)
+
+
 def drawer():
-    """The Settings drawer, mounted once in the app shell."""
+    """The Settings drawer, mounted once in the app shell. Sections start
+    collapsed (no default open value)."""
     return dmc.Drawer(
         id="gc-settings-drawer", position="right", size="min(520px, 96vw)",
         zIndex=3000, padding="lg", title="Settings",
-        children=dmc.Stack([
-            _profile_section(),
-            dmc.Divider(),
-            _avatar_section(),
-            dmc.Divider(),
-            _plan_settings_section(),
-        ], gap="lg"),
+        children=dmc.Accordion(
+            multiple=True, chevronPosition="right", variant="separated",
+            children=[
+                _acc_item("profile", "Profile",
+                          "height · weight · resting/max/threshold HR · VO₂max",
+                          _profile_section()),
+                _acc_item("avatar", "Coach avatar", "pick your coach",
+                          _avatar_section()),
+                _acc_item("plan", "Plan settings", "goal · race date · days",
+                          _plan_settings_section()),
+            ]),
     )
 
 
@@ -150,35 +174,22 @@ def _save_profile(_n, values, ids):
     return "Saved ✓"
 
 
-# --- Avatar upload / remove ------------------------------------------------
-_MAX_AVATAR_BYTES = 2_000_000
-
-
-@callback(Output("gc-avatar-preview", "children"),
+# --- Avatar pick -----------------------------------------------------------
+@callback(Output("gc-avatar-gallery", "children"),
           Output("gc-coach-fab", "children"),
           Output("gc-avatar-status", "children"),
-          Input("gc-avatar-upload", "contents"),
-          Input("gc-avatar-remove", "n_clicks"),
+          Input({"type": "gc-avatar-pick", "name": ALL}, "n_clicks"),
           prevent_initial_call=True)
-def _set_avatar(contents, _rm):
-    import base64
-
-    prefs = plan_mod.load_prefs()
-    if ctx.triggered_id == "gc-avatar-remove":
-        prefs.pop("avatar_data", None)
-        plan_mod.save_prefs(prefs)
-        default = data.coach_avatar()   # reverts to the bundled default coach
-        return avatar_preview(default), fab_content(default), "Reset to default coach"
-    if not contents or not contents.startswith("data:image/"):
+def _pick_avatar(_clicks):
+    trig = ctx.triggered_id
+    # Ignore the re-render that recreates the thumbs with n_clicks=0.
+    if not (isinstance(trig, dict) and ctx.triggered and ctx.triggered[0]["value"]):
         raise PreventUpdate
-    try:
-        raw = base64.b64decode(contents.split(",", 1)[1])
-    except (ValueError, IndexError):
-        return no_update, no_update, "Couldn't read that file"
-    if len(raw) > _MAX_AVATAR_BYTES:
-        return no_update, no_update, "Image too large (max 2 MB)"
-    plan_mod.save_prefs({**prefs, "avatar_data": contents})
-    return avatar_preview(contents), fab_content(contents), "Saved ✓"
+    name = trig["name"]
+    plan_mod.save_prefs({**plan_mod.load_prefs(), "avatar_preset": name})
+    avail = data.available_avatars()
+    return (_avatar_gallery(avail, name).children,
+            fab_content(data.avatar_url(name)), "Saved ✓")
 
 
 def fab_content(src):

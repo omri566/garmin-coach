@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 
@@ -262,13 +263,34 @@ def last_run() -> dict | None:
     return d
 
 
-# Bundled default coach avatar (served from dashboard/assets/). An uploaded image
-# in prefs overrides it; "Remove" in Settings reverts to this.
-DEFAULT_AVATAR = "/assets/avatars/coach3.png"
+# Coach avatars are curated image files bundled under dashboard/assets/avatars/;
+# the athlete picks one in Settings (stored as prefs['avatar_preset']). Drop more
+# images into that folder to grow the gallery.
+_AVATAR_DIR = Path(__file__).resolve().parent / "assets" / "avatars"
+_AVATAR_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"}
+_DEFAULT_AVATAR_NAME = "coach3.png"
+
+
+def available_avatars() -> list[str]:
+    """Filenames of the bundled coach avatars to choose from (sorted)."""
+    if not _AVATAR_DIR.is_dir():
+        return []
+    return sorted(p.name for p in _AVATAR_DIR.iterdir()
+                  if p.suffix.lower() in _AVATAR_EXTS)
+
+
+def avatar_url(name: str) -> str:
+    return f"/assets/avatars/{name}"
 
 
 def coach_avatar() -> str | None:
-    """The coach-avatar image URL: the athlete's uploaded data-URI if set,
-    otherwise the bundled default coach."""
+    """URL of the chosen coach avatar — the athlete's pick if it still exists,
+    else the default coach, else the first available image (None if none)."""
     from garmin_coach.coach import plan as plan_mod
-    return plan_mod.load_prefs().get("avatar_data") or DEFAULT_AVATAR
+    avail = available_avatars()
+    if not avail:
+        return None
+    chosen = plan_mod.load_prefs().get("avatar_preset")
+    if chosen in avail:
+        return avatar_url(chosen)
+    return avatar_url(_DEFAULT_AVATAR_NAME if _DEFAULT_AVATAR_NAME in avail else avail[0])
