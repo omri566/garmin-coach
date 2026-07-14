@@ -260,3 +260,15 @@ def last_run() -> dict | None:
     summary = json.loads(a["raw_json"]) if a and a["raw_json"] else {}
     d["name"] = summary.get("activityName") or "Run"
     return d
+
+
+# Bundled default coach avatar (served from dashboard/assets/). An uploaded image
+# in prefs overrides it; "Remove" in Settings reverts to this.
+DEFAULT_AVATAR = "/assets/avatars/coach3.png"
+
+
+def coach_avatar() -> str | None:
+    """The coach-avatar image URL: the athlete's uploaded data-URI if set,
+    otherwise the bundled default coach."""
+    from garmin_coach.coach import plan as plan_mod
+    return plan_mod.load_prefs().get("avatar_data") or DEFAULT_AVATAR
