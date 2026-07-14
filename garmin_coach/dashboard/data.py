@@ -262,8 +262,13 @@ def last_run() -> dict | None:
     return d
 
 
+# Bundled default coach avatar (served from dashboard/assets/). An uploaded image
+# in prefs overrides it; "Remove" in Settings reverts to this.
+DEFAULT_AVATAR = "/assets/avatars/coach3.png"
+
+
 def coach_avatar() -> str | None:
-    """The athlete's uploaded coach-avatar image as a data-URI, or None to fall
-    back to the default emoji. Stored in the shared plan preferences file."""
+    """The coach-avatar image URL: the athlete's uploaded data-URI if set,
+    otherwise the bundled default coach."""
     from garmin_coach.coach import plan as plan_mod
-    return plan_mod.load_prefs().get("avatar_data") or None
+    return plan_mod.load_prefs().get("avatar_data") or DEFAULT_AVATAR

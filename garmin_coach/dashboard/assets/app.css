@@ -770,7 +770,8 @@ table.mantine-Table-table { font-size: 0.9rem; }
 }
 .gc-coach-fab:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,0.55); }
 .gc-coach-fab:active { transform: translateY(0); }
-.gc-coach-fab-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+/* contain (not cover) so a full-body coach figure shows whole, not cropped */
+.gc-coach-fab-img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
 .gc-coach-fab-emoji { font-size: 1.7rem; line-height: 1; }
 
 /* moment cards (post-workout debrief / block wrap-up) at the top of the popup */
@@ -781,7 +782,7 @@ table.mantine-Table-table { font-size: 0.9rem; }
 
 /* avatar preview in Settings */
 .gc-avatar-preview {
-  width: 64px; height: 64px; border-radius: 50%; object-fit: cover;
+  width: 64px; height: 64px; border-radius: 50%; object-fit: contain; padding: 4px;
   border: 2px solid var(--line-2); display: flex; align-items: center;
   justify-content: center; background: var(--panel-2); overflow: hidden;
 }

@@ -167,7 +167,8 @@ def _set_avatar(contents, _rm):
     if ctx.triggered_id == "gc-avatar-remove":
         prefs.pop("avatar_data", None)
         plan_mod.save_prefs(prefs)
-        return avatar_preview(None), fab_content(None), "Removed"
+        default = data.coach_avatar()   # reverts to the bundled default coach
+        return avatar_preview(default), fab_content(default), "Reset to default coach"
     if not contents or not contents.startswith("data:image/"):
         raise PreventUpdate
     try:
