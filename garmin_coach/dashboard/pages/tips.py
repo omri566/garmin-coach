@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 import dash_mantine_components as dmc
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import recommend as rec_mod
@@ -141,6 +141,11 @@ def render_recs(rec, limit=TIP_LIMIT):
 
 def _tips_body():
     return dmc.Stack([
+        dmc.Group([
+            dmc.Text("Your coach", fw=700, size="sm"),
+            html.Button("✕", id="gc-tips-close", n_clicks=0,
+                        className="gc-tips-close", **{"aria-label": "Close"}),
+        ], justify="space-between", align="center"),
         dcc.Loading(html.Div(coach_moments.moment_cards(), id="gc-coach-moments"),
                     type="dot", color=figures.AMP),
         html.Div(render_recs(rec_mod.load_latest()), id="coach-recs"),
@@ -149,32 +154,47 @@ def _tips_body():
     ], gap="md")
 
 
-def popover():
-    """The coach button + its floating tips popup (mounted once in the shell).
+def widget():
+    """The movable floating coach + its tips popup, mounted once in the shell.
 
-    Tips 'pop' from the coach (a Popover anchored to the avatar) instead of
-    sliding in a full-height drawer. The button is the Popover target; the app
-    shell wraps this in a draggable dock so the whole thing can be moved."""
+    The dock is a fixed, draggable wrapper (see assets/coach_fab.js); inside it the
+    tips panel is anchored just above the plain-`html.Button` avatar and shown/
+    hidden purely by a CSS class we toggle from a store we own — so opening is
+    100% reliable (no Mantine Popover cloning the button or de-syncing its state).
+    """
     from garmin_coach.dashboard.pages import settings
     fab = html.Button(settings.fab_content(data.coach_avatar()),
                       id="gc-coach-fab", n_clicks=0, className="gc-coach-fab",
                       **{"aria-label": "Coaching tips"})
-    return dmc.Popover(
-        id="gc-tips-popover", opened=False, position="top-end", withArrow=True,
-        arrowSize=12, shadow="xl", width=360, zIndex=3000, radius="lg", offset=14,
-        closeOnClickOutside=True, closeOnEscape=True,
-        children=[
-            dmc.PopoverTarget(fab),
-            dmc.PopoverDropdown(_tips_body(), className="gc-tips-pop"),
-        ])
+    return html.Div([
+        dcc.Store(id="gc-tips-open", data=False),
+        html.Div(_tips_body(), id="gc-tips-pop", className="gc-tips-pop"),
+        fab,
+    ], id="gc-coach-dock", className="gc-coach-dock")
+
+
+@callback(Output("gc-tips-open", "data"),
+          Input("gc-coach-fab", "n_clicks"), Input("gc-tips-close", "n_clicks"),
+          State("gc-tips-open", "data"), prevent_initial_call=True)
+def _toggle(_fab, _close, is_open):
+    """Coach tap toggles the popup; the ✕ always closes it. Fully deterministic —
+    we own the open state, so a tap always registers."""
+    if ctx.triggered_id == "gc-tips-close":
+        return False
+    return not is_open
+
+
+@callback(Output("gc-tips-pop", "className"), Input("gc-tips-open", "data"))
+def _visibility(is_open):
+    return "gc-tips-pop open" if is_open else "gc-tips-pop"
 
 
 @callback(Output("gc-coach-moments", "children"),
-          Input("gc-tips-popover", "opened"), prevent_initial_call=True)
-def _fill_moments(opened):
+          Input("gc-tips-open", "data"), prevent_initial_call=True)
+def _fill_moments(is_open):
     """When the coach popup opens, generate any missing moments (cached) and show
     them. Generation is one-time per run/block, so repeat opens are instant."""
-    if not opened:
+    if not is_open:
         raise PreventUpdate
     coach_moments.ensure_moments()
     return coach_moments.moment_cards()

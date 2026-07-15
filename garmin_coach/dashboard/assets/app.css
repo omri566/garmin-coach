@@ -645,6 +645,10 @@ table.mantine-Table-table { font-size: 0.9rem; }
     margin: 0; padding: 6px 10px calc(8px + env(safe-area-inset-bottom, 0px));
     background: var(--ink-2); border-top: 1px solid var(--line);
     box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
+    /* Promote to its own GPU layer so iOS Safari repaints it in lockstep with
+       the page during momentum scroll, instead of letting it drift up. */
+    transform: translateZ(0); -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
   .gc-nav .mantine-SegmentedControl-root { display: flex; width: 100%; gap: 0; }
   .gc-nav .mantine-SegmentedControl-control { flex: 1 1 0; min-width: 0; }
@@ -758,8 +762,11 @@ table.mantine-Table-table { font-size: 0.9rem; }
   }
 }
 
-/* ---- Movable floating coach + tips popover ---- */
-/* The dock is the fixed, draggable wrapper; the button lives inside it. */
+/* ---- Movable floating coach + tips popup ---- */
+/* The dock is the fixed, draggable wrapper; the button + popup live inside it, so
+   the popup follows the coach when moved. No dmc.Popover — a plain button toggles
+   a CSS-shown panel, which keeps opening 100% reliable (Mantine's Popover cloned
+   the target button and fought Dash's n_clicks). */
 .gc-coach-dock { position: fixed; right: 20px; bottom: 20px; z-index: 1500; }
 .gc-coach-fab {
   width: 58px; height: 58px; border-radius: 50%;
@@ -771,8 +778,20 @@ table.mantine-Table-table { font-size: 0.9rem; }
 }
 .gc-coach-fab:hover { box-shadow: 0 10px 26px rgba(0,0,0,0.55); }
 .gc-coach-fab:active { cursor: grabbing; }
-/* the tips popover body: cap height and scroll rather than run off-screen */
-.gc-tips-pop { max-height: 72vh; overflow-y: auto; }
+/* Tips popup: a card anchored just above the coach button. Hidden until opened. */
+.gc-tips-pop {
+  display: none; position: absolute; bottom: calc(100% + 12px); right: 0;
+  width: min(360px, 86vw); max-height: 70vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px;
+  padding: 16px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  -webkit-overflow-scrolling: touch;
+}
+.gc-tips-pop.open { display: block; }
+.gc-tips-close {
+  background: none; border: none; color: var(--muted); font-size: 1.15rem;
+  line-height: 1; cursor: pointer; padding: 2px 6px;
+}
+.gc-tips-close:hover { color: var(--text); }
 /* contain (not cover) so a full-body coach figure shows whole, not cropped */
 .gc-coach-fab-img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
 .gc-coach-fab-emoji { font-size: 1.7rem; line-height: 1; }
