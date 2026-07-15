@@ -37,6 +37,16 @@ app = dash.Dash(__name__, external_stylesheets=dmc.styles.ALL,
                             "content": "width=device-width, initial-scale=1"}])
 server = app.server
 
+# gzip the big JSON responses (_dash-layout / -dependencies / callback payloads).
+# On a phone over Tailscale this is a large, cheap win; guarded so local dev runs
+# even without flask-compress installed.
+try:
+    from flask_compress import Compress
+
+    Compress(server)
+except Exception:  # noqa: BLE001 — compression is an optimisation, never required
+    pass
+
 # Set the page background before the React app mounts so there's no flash.
 app.index_string = """<!DOCTYPE html>
 <html>

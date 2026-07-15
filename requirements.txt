@@ -8,3 +8,5 @@ python-dotenv
 dash
 dash-mantine-components
 plotly
+gunicorn
+flask-compress
