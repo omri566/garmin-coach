@@ -108,10 +108,9 @@ def _shell_inner():
                 html.Div(coach.layout(), id="tab-coach", style=_HIDE),
                 _chart_modal(),
                 # Global overlays (outside the tabs, so their ids always exist):
-                # the movable floating coach + its tips popover (dragged via the
+                # the movable floating coach + its tips popup (dragged via the
                 # dock; see assets/coach_fab.js), and the Settings drawer.
-                html.Div(tips.popover(), id="gc-coach-dock",
-                         className="gc-coach-dock"),
+                tips.widget(),
                 settings.drawer(),
             ]),
         )
@@ -186,12 +185,6 @@ def switch_tab(tab):
     return (_SHOW if tab == "overview" else _HIDE,
             _SHOW if tab == "analysis" else _HIDE,
             _SHOW if tab == "coach" else _HIDE)
-
-
-@callback(Output("gc-tips-popover", "opened"), Input("gc-coach-fab", "n_clicks"),
-          State("gc-tips-popover", "opened"), prevent_initial_call=True)
-def _open_tips(_n, opened):
-    return not opened
 
 
 @callback(Output("gc-settings-drawer", "opened"), Input("gc-settings-btn", "n_clicks"),
