@@ -146,6 +146,7 @@ def _tips_body():
             html.Button("✕", id="gc-tips-close", n_clicks=0,
                         className="gc-tips-close", **{"aria-label": "Close"}),
         ], justify="space-between", align="center"),
+        dcc.Loading(html.Div(id="gc-lastrun-read"), type="dot", color=figures.AMP),
         dcc.Loading(html.Div(coach_moments.moment_cards(), id="gc-coach-moments"),
                     type="dot", color=figures.AMP),
         html.Div(render_recs(rec_mod.load_latest()), id="coach-recs"),
@@ -189,11 +190,21 @@ def _visibility(is_open):
     return "gc-tips-pop open" if is_open else "gc-tips-pop"
 
 
+@callback(Output("gc-lastrun-read", "children"),
+          Input("gc-tips-open", "data"), prevent_initial_call=True)
+def _lastrun_read(is_open):
+    """The coach's read of your last run — generated on first open (any run type),
+    cached after, and it surfaces the reason if it can't be produced."""
+    if not is_open:
+        raise PreventUpdate
+    return coach_moments.last_run_read()
+
+
 @callback(Output("gc-coach-moments", "children"),
           Input("gc-tips-open", "data"), prevent_initial_call=True)
 def _fill_moments(is_open):
-    """When the coach popup opens, generate any missing moments (cached) and show
-    them. Generation is one-time per run/block, so repeat opens are instant."""
+    """When the coach popup opens, generate the block-summary moment (cached) and
+    show it. Generation is one-time per block, so repeat opens are instant."""
     if not is_open:
         raise PreventUpdate
     coach_moments.ensure_moments()
