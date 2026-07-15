@@ -21,4 +21,15 @@ def write_streams(activity_id: int, df: pd.DataFrame) -> Path:
 
 
 def read_streams(activity_id: int) -> pd.DataFrame:
-    return pd.read_parquet(streams_path(activity_id), engine="pyarrow")
+    """Per-second streams for an activity, or an empty frame if it has none.
+
+    Not every activity has a stream file — ingest only writes one when the FIT had
+    per-second records (see ingest.sync). A Garmin *structured workout* in
+    particular can come through with none, so callers must not crash: return an
+    empty DataFrame rather than raising FileNotFoundError. Consumers
+    (segments.best_sustained / km_splits, the coach's read) already treat an empty
+    frame as 'no per-second data'."""
+    path = streams_path(activity_id)
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path, engine="pyarrow")
