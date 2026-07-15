@@ -35,6 +35,7 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install
 
 echo "== 5/6  systemd: app service + nightly sync timer =="
 BIN="$APP_DIR/.venv/bin/python"
+GUNICORN="$APP_DIR/.venv/bin/gunicorn"
 ENVPATH="$HOME/.local/bin:$HOME/.claude/local:/usr/local/bin:/usr/bin:/bin"
 
 sudo tee /etc/systemd/system/garmin-coach.service >/dev/null <<UNIT
@@ -51,7 +52,10 @@ Environment=GC_PORT=8050
 Environment=GC_DEBUG=0
 Environment=GC_DATA_DIR=$APP_DIR/data
 Environment=PATH=$ENVPATH
-ExecStart=$BIN -m garmin_coach.dashboard.app
+# Production WSGI server (not the Flask dev server). One worker keeps the app's
+# in-process caches coherent; gthread lets slow LLM calls (coach tips) run without
+# blocking other requests. --timeout 180 so a long LLM call isn't killed.
+ExecStart=$GUNICORN --workers 1 --threads 8 --worker-class gthread --timeout 180 --bind 0.0.0.0:8050 garmin_coach.dashboard.app:server
 Restart=on-failure
 RestartSec=5
 

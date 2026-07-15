@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 import dash_mantine_components as dmc
-from dash import Input, Output, callback, clientside_callback, dcc, html
+from dash import Input, Output, State, callback, clientside_callback, dcc, html
+from dash.exceptions import PreventUpdate
 
 from garmin_coach.analytics import intra
 from garmin_coach.dashboard import data, figures
 from garmin_coach.dashboard.ui import (
-    CARD, GRAPH_CFG, fig_id, fmt_pace, panel, range_tabs, section, with_info,
+    CARD,
+    GRAPH_CFG,
+    fig_id,
+    fmt_pace,
+    panel,
+    range_tabs,
+    section,
+    with_info,
 )
 
 # Reference ranges (sport-science typical bands) for the technique comparison.
@@ -134,6 +142,10 @@ def layout():
         html.Div(id="an-technique"),
     ], gap="md")
     return dmc.Stack([
+        # Deep Analysis is hidden on the landing page; its charts/per-run analysis
+        # are only computed once this flips True (first time the tab is opened), so
+        # they don't slow the initial load. See _activate below.
+        dcc.Store(id="an-active", data=False),
         dmc.Group([
             dmc.Text("Run", size="xs", c="dimmed", className="mono",
                      style={"letterSpacing": "0.12em", "textTransform": "uppercase"}),
@@ -323,17 +335,32 @@ def trends_section():
     ], gap="sm")
 
 
+@callback(Output("an-active", "data"), Input("tab-switch", "value"),
+          State("an-active", "data"), prevent_initial_call=True)
+def _activate(tab, already):
+    """Flip on the first time Deep Analysis is opened — this is what triggers the
+    (deferred) chart + per-run callbacks below to compute for the first time."""
+    if tab == "analysis" and not already:
+        return True
+    raise PreventUpdate
+
+
 def _make_group_callback(builder, keys):
-    def _update(rng):
+    def _update(rng, active):
+        if not active:                    # tab never opened yet — don't compute
+            raise PreventUpdate
         f = builder(rng)
         return [f[k] for k in keys]
     return _update
 
 
-# One range callback per collapsible group, scoped to just its charts.
+# One range callback per collapsible group, scoped to just its charts. Deferred:
+# fires when the tab first activates (an-active) and on any later range change,
+# never on initial page load.
 for _gid, (_ctl, _builder, _keys) in _GROUPS.items():
     callback([Output(fig_id(k), "figure") for k in _keys],
-             Input(_ctl, "value"))(_make_group_callback(_builder, _keys))
+             Input(_ctl, "value"), Input("an-active", "data"),
+             prevent_initial_call=True)(_make_group_callback(_builder, _keys))
 
 
 # Plotly graphs rendered inside a collapsed panel come up at zero width; nudge
@@ -355,8 +382,12 @@ clientside_callback(
     Output("an-cadence", "children"),
     Output("an-technique", "children"),
     Input("an-run", "value"),
+    Input("an-active", "data"),
+    prevent_initial_call=True,
 )
-def render(activity_id):
+def render(activity_id, active):
+    if not active:                        # deferred until the tab is first opened
+        raise PreventUpdate
     if not activity_id:
         return "—", None, None, None, None, None
     m = data.run_metrics(activity_id) or {}

@@ -478,8 +478,10 @@ def load_fatigue_series(rng: str = "1y"):
 
 
 @callback(Output(fig_id("ov-ff"), "figure"), Output(fig_id("ov-acwr"), "figure"),
-          Input("ov-range", "value"))
+          Input("ov-range", "value"), prevent_initial_call=True)
 def _update_load_fatigue(rng):
+    # layout() already renders these at the default "1y"; only rebuild on a range
+    # change, so the landing tab doesn't compute the same figures twice on load.
     ldf = load_fatigue_series(rng)
     return figures.fitness_form(ldf), figures.acwr(ldf)
 
@@ -492,9 +494,10 @@ def recovery_fig(rng="1y"):
                                 height=300)
 
 
-@callback(Output(fig_id("ov-recovery"), "figure"), Input("ov-rec-range", "value"))
+@callback(Output(fig_id("ov-recovery"), "figure"), Input("ov-rec-range", "value"),
+          prevent_initial_call=True)
 def _update_recovery(rng):
-    return recovery_fig(rng)
+    return recovery_fig(rng)   # layout() already renders the default "1y"
 
 
 def layout():
