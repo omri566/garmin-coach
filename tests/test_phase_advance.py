@@ -20,7 +20,7 @@ class FakeProvider:
         self.out = out
         self.calls = 0
 
-    def generate_json(self, prompt, schema, system=None, model=None):
+    def generate_json(self, prompt, schema, system=None, model=None, **kwargs):
         self.calls += 1
         return self.out
 

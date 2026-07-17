@@ -29,19 +29,23 @@ def _matched_session(r):
     return None
 
 
-def last_run_note() -> dict | None:
-    """The coach's read of the most recent run — any run type. Generates once and
-    caches. Returns {'headline','detail'} on success, {'error': reason} on failure
-    (so the popup can *show why* instead of silently blank), or None if no run."""
+def last_run_note(generate: bool = False) -> dict | None:
+    """The coach's read of the most recent run — any run type.
+
+    Default is **cached-only** (no LLM): the coach popup must open instantly and
+    never block on a slow/hung `claude` call. Pass `generate=True` on an explicit
+    action (Refresh) or from the background pipeline to produce it. Returns
+    {'headline','detail'} on success, {'error': reason} when generation was asked
+    for and failed, or None if nothing to show yet."""
     try:
         r = data.last_run()
     except Exception as e:  # noqa: BLE001
-        return {"error": f"Couldn't load your last run: {e}"}
+        return {"error": f"Couldn't load your last run: {e}"} if generate else None
     if not r:
         return None
     aid = r.get("activity_id")
     hit = execution.cached(aid)
-    if not hit:
+    if not hit and generate:
         try:
             session = _matched_session(r)          # None for a free/unplanned run
             streams = data.run_streams(aid)
@@ -54,11 +58,16 @@ def last_run_note() -> dict | None:
             "detail": hit.get("detail", "")}
 
 
-def ensure_moments():
-    """Generate the block-summary wrap-up (cached) when the popup opens. Guarded —
-    a missing LLM or data gap must never break opening the popup."""
+def generate_moments():
+    """Generate the LLM-backed moments (block wrap-up + last-run read) and cache
+    them. Runs only on an explicit action (Refresh) or the background pipeline —
+    never on the popup-open path, so opening the coach can't hang on the LLM."""
     try:
         from garmin_coach.coach import block_summary
         block_summary.ensure_current()
     except Exception:  # noqa: BLE001 — wrap-up is best-effort
+        pass
+    try:
+        last_run_note(generate=True)
+    except Exception:  # noqa: BLE001
         pass

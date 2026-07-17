@@ -225,7 +225,10 @@ def advance_phase(plan: dict | None = None, provider=None,
         f"debrief of the phase just finished: a one-line headline congratulating the athlete, "
         f"and 2-3 specific things to do better in this next phase, grounded in the data above."
     )
-    res = provider.generate_json(prompt, ADVANCE_SCHEMA, system=SYSTEM, model=model)
+    # Cap under the web server's request timeout so a slow/hung claude surfaces a
+    # retryable error instead of the worker being killed mid-request.
+    res = provider.generate_json(prompt, ADVANCE_SCHEMA, system=SYSTEM, model=model,
+                                 timeout=150)
     debrief = res.get("debrief") or {}
     plan["next_month"] = res.get("weeks") or []
     plan["phase_index"] = status["next_index"]
