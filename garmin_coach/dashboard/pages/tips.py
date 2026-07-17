@@ -44,7 +44,8 @@ def _messages():
     phase = _phase_done_message()                  # leads if a phase just finished
     if phase:
         msgs.append(phase)
-    coach_moments.ensure_moments()                 # generate the block wrap-up (cached)
+    # Cached-only — opening the coach must never block on the LLM. Moments are
+    # generated on Refresh or by the background pipeline (coach_moments).
     rec = rec_mod.load_latest() or {}
     recs = _top_recs(rec.get("recommendations", []))
 
@@ -193,7 +194,8 @@ def _visibility(is_open):
 @callback(Output("gc-coach-says", "children"),
           Input("gc-tips-open", "data"), prevent_initial_call=True)
 def _fill(is_open):
-    """Build the coach's messages on first open (generating cached LLM content)."""
+    """Render the coach's messages when the popup opens — cached content only, so
+    it's instant and can never hang on the LLM."""
     if not is_open:
         raise PreventUpdate
     return _says_view()
@@ -201,6 +203,11 @@ def _fill(is_open):
 
 @callback(Output("gc-coach-says", "children", allow_duplicate=True),
           Input("coach-rec-btn", "n_clicks"), prevent_initial_call=True)
-def _refresh(_n):
+def _refresh(n):
+    """Explicit refresh: (re)generate the tips + moments (LLM), then re-render.
+    Guarded against the inject-fires-callback gotcha so it doesn't self-trigger."""
+    if not n:
+        raise PreventUpdate
     rec_mod.recommend()
+    coach_moments.generate_moments()
     return _says_view()
