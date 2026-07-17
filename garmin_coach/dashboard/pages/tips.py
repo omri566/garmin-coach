@@ -8,12 +8,14 @@ messages (last-run read, block wrap-up) are generated once on open and cached.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 import dash_mantine_components as dmc
 from dash import Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
+from garmin_coach.coach import plan as plan_mod
 from garmin_coach.coach import recommend as rec_mod
 from garmin_coach.dashboard import coach_moments, data, figures
 
@@ -39,6 +41,9 @@ def _messages():
     """Ordered coach messages for the popup: dicts of {label, head, detail}. One is
     shown at a time; chips switch between them. Only messages with content appear."""
     msgs: list[dict] = []
+    phase = _phase_done_message()                  # leads if a phase just finished
+    if phase:
+        msgs.append(phase)
     coach_moments.ensure_moments()                 # generate the block wrap-up (cached)
     rec = rec_mod.load_latest() or {}
     recs = _top_recs(rec.get("recommendations", []))
@@ -75,6 +80,29 @@ def _messages():
                      "detail": "  •  ".join(
                          (r.get("action") or _short_title(r.get("title", ""))) for r in extra)})
     return msgs
+
+
+def _phase_done_message():
+    """A temporary 'Phase done 🎉' message for the ~10 days after advancing into a
+    new phase — congrats + what to improve, from `plan.advance_phase`'s debrief."""
+    plan = plan_mod.load_latest() or {}
+    deb = plan.get("phase_debrief") or {}
+    if deb.get("phase_index") != plan.get("phase_index", 0):
+        return None
+    if not (deb.get("headline") or deb.get("improve")):
+        return None
+    gen = (deb.get("generated_at") or "")[:10]
+    try:
+        if gen and (dt.date.today() - dt.date.fromisoformat(gen)).days > 10:
+            return None
+    except ValueError:
+        pass
+    macro = plan.get("macro") or []
+    idx = plan.get("phase_index", 0)
+    moved_into = macro[idx].get("phase") if 0 <= idx < len(macro) else "your new phase"
+    return {"label": "Phase done 🎉",
+            "head": deb.get("headline") or f"You started {moved_into}!",
+            "detail": "  •  ".join(deb.get("improve") or [])}
 
 
 def _this_week(rec):

@@ -81,6 +81,27 @@ PLAN_SCHEMA = {
 }
 
 
+# The next phase's detailed weeks reuse the exact next_month week shape, plus a
+# short debrief of the phase just finished (congrats + what to improve next).
+ADVANCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "weeks": PLAN_SCHEMA["properties"]["next_month"],
+        "debrief": {
+            "type": "object",
+            "properties": {
+                "headline": {"type": "string",
+                             "description": "one-line congratulations on the phase just finished"},
+                "improve": {"type": "array", "items": {"type": "string"},
+                            "description": "2-3 specific things to do better in the next phase, from the data"},
+            },
+            "required": ["headline", "improve"],
+        },
+    },
+    "required": ["weeks", "debrief"],
+}
+
+
 def make_plan(goal: str, goal_date: str | None = None, provider=None,
               model: str | None = None,
               preferred_days: list[str] | None = None) -> dict:
@@ -148,6 +169,79 @@ def apply_preferred_days(plan: dict, preferred_days: list[str]) -> dict:
             overrides.pop(key)
     plan["preferred_days"] = pref
     save_latest(plan)
+    return plan
+
+
+def phase_status(plan: dict | None, today: dt.date | None = None) -> dict:
+    """Where the athlete is in the macro plan: has the current detailed block
+    finished, and is there a next phase to advance into.
+
+    `block_finished` — today is past the last `next_month` week's Saturday.
+    `current_phase` / `next_phase` — from `macro[phase_index]` and the one after.
+    """
+    from garmin_coach.coach import schedule
+    today = today or dt.date.today()
+    macro = (plan or {}).get("macro") or []
+    idx = (plan or {}).get("phase_index", 0)
+    current_phase = macro[idx] if 0 <= idx < len(macro) else None
+    next_phase = macro[idx + 1] if idx + 1 < len(macro) else None
+    weeks = schedule.build_schedule(plan, today).get("weeks") if plan else []
+    last_end = max((w["end"] for w in weeks), default=None)
+    block_finished = bool(last_end and today > last_end)
+    return {"block_finished": block_finished, "current_phase": current_phase,
+            "next_phase": next_phase, "next_index": (idx + 1) if next_phase else None,
+            "is_last": block_finished and next_phase is None}
+
+
+def advance_phase(plan: dict | None = None, provider=None,
+                  model: str | None = None) -> dict | None:
+    """Generate the next macro phase's detailed 4-week block once the current block
+    is finished, plus a debrief of the phase just completed. Idempotent: if the
+    block isn't finished (or there's no next phase), returns the plan unchanged.
+    """
+    from garmin_coach.coach import context, schedule
+    plan = plan if plan is not None else load_latest()
+    if plan is None:
+        return None
+    status = phase_status(plan)
+    if not status["block_finished"] or not status["next_phase"]:
+        return plan
+
+    cur, nxt = status["current_phase"] or {}, status["next_phase"]
+    weeks = schedule.build_schedule(plan)["weeks"]
+    next_start = max(w["end"] for w in weeks) + dt.timedelta(days=1)  # the next Sunday
+    provider = provider or get_provider("claude")
+    prompt = (
+        f"{context.brief_text()}\n\nGOAL: {plan.get('goal', '')}.\n\n"
+        f"The athlete just finished the '{cur.get('phase', '')}' phase and is moving "
+        f"into '{nxt.get('phase', '')}' — focus: {nxt.get('focus', '')}; target volume: "
+        f"{nxt.get('weekly_volume_km', '')}; key workouts: "
+        f"{', '.join(nxt.get('key_workouts', []) or [])}.\n\n"
+        f"# How the finished block actually went\n{schedule.execution_summary_text(plan)}\n\n"
+        f"Design the DETAILED next 4 training weeks for the '{nxt.get('phase', '')}' phase, "
+        f"continuing the progression from current fitness — do NOT restart from base. The "
+        f"first week starts Sunday {next_start.isoformat()}; label each week with its "
+        f"Sunday-start and Saturday-end dates and order sessions Sun→Sat. Also give a short "
+        f"debrief of the phase just finished: a one-line headline congratulating the athlete, "
+        f"and 2-3 specific things to do better in this next phase, grounded in the data above."
+    )
+    res = provider.generate_json(prompt, ADVANCE_SCHEMA, system=SYSTEM, model=model)
+    debrief = res.get("debrief") or {}
+    plan["next_month"] = res.get("weeks") or []
+    plan["phase_index"] = status["next_index"]
+    plan["phase_debrief"] = {
+        "finished_phase": cur.get("phase", ""),
+        "phase_index": status["next_index"],
+        "headline": (debrief.get("headline") or "").strip(),
+        "improve": [s for s in (debrief.get("improve") or []) if s],
+        "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    plan["overrides"] = {}              # old block's "<week>:<session>" keys are stale
+    plan.pop("congrats_ack", None)      # let the congrats show for the new phase
+    if plan.get("preferred_days"):
+        apply_preferred_days(plan, plan["preferred_days"])
+    else:
+        save_latest(plan)
     return plan
 
 

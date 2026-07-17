@@ -13,8 +13,19 @@ import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import (ALL, ClientsideFunction, Input, Output, State, callback,
-                  clientside_callback, ctx, dcc, html)
+from dash import (
+    ALL,
+    ClientsideFunction,
+    Input,
+    Output,
+    State,
+    callback,
+    clientside_callback,
+    ctx,
+    dcc,
+    html,
+    no_update,
+)
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
@@ -222,7 +233,7 @@ def _progress_hero(plan, sched, streak):
 
     chips = []
     if streak >= 2:
-        chips.append(html.Div(["🔥 ", html.B(f"{streak}"), f"-week streak"],
+        chips.append(html.Div(["🔥 ", html.B(f"{streak}"), "-week streak"],
                               className="gc-hero-chip hot"))
     if fit and fit.get("delta") is not None and abs(fit["delta"]) >= 1:
         up = fit["delta"] >= 0
@@ -383,10 +394,48 @@ def _macro_timeline(plan, today):
     return html.Div(nodes, className="gc-phase-timeline")
 
 
+def _phase_building_view(status):
+    """Shown the moment a phase finishes: a congrats card + a one-shot Interval
+    that fires the auto-advance callback to generate the next block."""
+    cur = (status["current_phase"] or {}).get("phase", "this phase")
+    nxt = (status["next_phase"] or {}).get("phase", "the next phase")
+    return dmc.Stack([
+        dcc.Interval(id="gc-phase-advance", interval=350, max_intervals=1),
+        dcc.Loading(dmc.Card([
+            dmc.Text(f"🎉 You finished the {cur} phase!", fw=800, size="lg"),
+            dmc.Text(f"Building your {nxt} plan — this takes a few seconds…",
+                     c="dimmed", size="sm", mt=6),
+        ], className="gc-card", radius="md", p="xl"), type="dot", color=figures.AMP),
+    ], gap="md")
+
+
+def _phase_error_view(msg):
+    return dmc.Card([
+        dmc.Text("Couldn't build your next phase", fw=700, size="md"),
+        dmc.Text(msg[:300], c="dimmed", size="sm", mt=6,
+                 style={"whiteSpace": "pre-wrap"}),
+        dmc.Button("Try again", id="gc-phase-retry", variant="light", mt="md"),
+    ], className="gc-card", radius="md", p="lg")
+
+
+def _plan_complete_view(plan):
+    return dmc.Card([
+        dmc.Text("🏁 Plan complete — great work!", fw=800, size="lg"),
+        dmc.Text(f"You've finished every phase of “{plan.get('goal', 'your plan')}”. "
+                 "Set a new goal in ⚙ Settings when you're ready for what's next.",
+                 c="dimmed", size="sm", mt=8),
+    ], className="gc-card", radius="md", p="xl")
+
+
 def render_plan(plan):
     if not plan:
         return _empty("No plan yet — open ⚙ Settings, set a goal under Plan "
                       "settings, and click Generate plan.")
+    status = plan_mod.phase_status(plan)
+    if status["block_finished"] and status["next_phase"]:
+        return _phase_building_view(status)      # auto-advance to the next phase
+    if status["is_last"]:
+        return _plan_complete_view(plan)
     sched = schedule.build_schedule(plan)
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
@@ -469,3 +518,55 @@ def _edit_plan(dnd, _clicks, viewed):
     if plan is None:
         raise PreventUpdate
     return render_boards(plan), _week_track(plan, _view_idx(viewed)), status
+
+
+def congrats_content(plan):
+    """Body of the phase-complete congrats modal (built from the advanced plan)."""
+    deb = plan.get("phase_debrief") or {}
+    macro = plan.get("macro") or []
+    idx = plan.get("phase_index", 0)
+    moved_into = macro[idx].get("phase") if 0 <= idx < len(macro) else "your next phase"
+    finished = deb.get("finished_phase") or "your phase"
+    improve = deb.get("improve") or []
+    body = [
+        dmc.Text(f"🎉 You finished the {finished} phase!", fw=800, size="lg"),
+        dmc.Text(deb.get("headline", ""), c="dimmed", size="sm", mt=6),
+    ]
+    if improve:
+        body.append(dmc.Stack(
+            [dmc.Text(f"To get the most from {moved_into}:", fw=600, size="sm", mt=10),
+             *[dmc.Text("• " + s, size="sm", c="dimmed") for s in improve]], gap=4))
+    body.append(dmc.Button(f"See your {moved_into} plan →", id="gc-congrats-ok", mt="lg"))
+    return dmc.Stack(body, gap=6)
+
+
+def _advance_or_error():
+    """Run advance_phase once and return (plan-view, overlay_class, congrats_body).
+    Guards against re-firing: if the phase index didn't move, the advance didn't
+    happen (LLM error / no next phase) — show a retryable error, don't loop."""
+    try:
+        before = (plan_mod.load_latest() or {}).get("phase_index", 0)
+        plan = plan_mod.advance_phase()
+    except Exception as e:  # noqa: BLE001 — surface the reason, don't crash the tab
+        return _phase_error_view(f"{type(e).__name__}: {e}"), no_update, no_update
+    if not plan or plan.get("phase_index", 0) == before:
+        return _phase_error_view("The coach didn't return a valid next block."), \
+            no_update, no_update
+    return render_plan(plan), "gc-congrats-overlay open", congrats_content(plan)
+
+
+@callback(Output("coach-plan", "children", allow_duplicate=True),
+          Output("gc-congrats", "className", allow_duplicate=True),
+          Output("gc-congrats-body", "children", allow_duplicate=True),
+          Input("gc-phase-advance", "n_intervals"), prevent_initial_call=True)
+def _do_advance(_n):
+    """Fires once when the 'building…' view mounts (a finished phase was detected)."""
+    return _advance_or_error()
+
+
+@callback(Output("coach-plan", "children", allow_duplicate=True),
+          Output("gc-congrats", "className", allow_duplicate=True),
+          Output("gc-congrats-body", "children", allow_duplicate=True),
+          Input("gc-phase-retry", "n_clicks"), prevent_initial_call=True)
+def _retry_advance(_n):
+    return _advance_or_error()
