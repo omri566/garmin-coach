@@ -170,7 +170,13 @@ def recs_ticker():
 
 @callback(Output("tab-switch", "value"), Input("ticker-goto-coach", "n_clicks"),
           prevent_initial_call=True)
-def _ticker_to_coach(_n):
+def _ticker_to_coach(n):
+    # Only a real click should switch tabs. 'Sync now' rebuilds overview.layout(),
+    # which re-creates this button (n_clicks resets to 0) and fires this callback
+    # even under prevent_initial_call — without this guard that spurious fire threw
+    # the user onto the Training Plan tab after every sync.
+    if not n:
+        raise PreventUpdate
     return "coach"
 
 
