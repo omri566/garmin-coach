@@ -17,6 +17,7 @@ from dash import ALL, Input, Output, State, _dash_renderer, callback, ctx, dcc, 
 from dash.exceptions import PreventUpdate
 
 from garmin_coach import config
+from garmin_coach.coach import plan as plan_mod
 from garmin_coach.dashboard import figures, ui
 from garmin_coach.dashboard.pages import analysis, coach, onboarding, overview, settings, tips
 from garmin_coach.setup import state as setup_state
@@ -112,6 +113,7 @@ def _shell_inner():
                 # dock; see assets/coach_fab.js), and the Settings drawer.
                 tips.widget(),
                 settings.drawer(),
+                _congrats_overlay(),
             ]),
         )
 
@@ -191,6 +193,48 @@ def switch_tab(tab):
           prevent_initial_call=True)
 def _open_settings(_n):
     return True
+
+
+def _unacked_debrief(plan):
+    """The phase debrief still awaiting the congrats dismissal, or None."""
+    deb = (plan or {}).get("phase_debrief") or {}
+    finished = deb.get("finished_phase")
+    if finished and (plan or {}).get("congrats_ack") != finished:
+        return deb
+    return None
+
+
+_CONGRATS_CLS = "gc-congrats-overlay"
+
+
+def _congrats_overlay():
+    """One-time 'you finished a phase' overlay. A plain div toggled by a CSS class
+    we own (like the coach popup) — no dmc.Modal two-way `opened` binding, which
+    flashed the modal shut. Shows on load if a debrief is unacked (covers
+    reopening the app); the advance callback opens it live via the class."""
+    plan = plan_mod.load_latest() or {}
+    deb = _unacked_debrief(plan)
+    return html.Div(
+        html.Div([html.Div(coach.congrats_content(plan) if deb else None,
+                           id="gc-congrats-body")], className="gc-congrats-card"),
+        id="gc-congrats", className=_CONGRATS_CLS + (" open" if deb else ""))
+
+
+@callback(Output("gc-congrats", "className", allow_duplicate=True),
+          Output("tab-switch", "value", allow_duplicate=True),
+          Input("gc-congrats-ok", "n_clicks"), prevent_initial_call=True)
+def _congrats_ok(n):
+    """'See your … plan' closes the overlay, remembers it (once-only), and opens
+    the Training Plan tab. Guard against the spurious fire when the button is
+    injected into the overlay (n_clicks resets to 0), which would auto-dismiss it."""
+    if not n:
+        raise PreventUpdate
+    plan = plan_mod.load_latest() or {}
+    deb = plan.get("phase_debrief") or {}
+    if deb.get("finished_phase"):
+        plan["congrats_ack"] = deb["finished_phase"]
+        plan_mod.save_latest(plan)
+    return _CONGRATS_CLS, "coach"
 
 
 def _activity_count() -> int:

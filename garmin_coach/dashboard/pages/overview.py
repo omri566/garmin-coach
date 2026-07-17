@@ -14,8 +14,17 @@ from garmin_coach.coach import recommend as rec_mod
 from garmin_coach.coach import schedule
 from garmin_coach.dashboard import data, figures
 from garmin_coach.dashboard.ui import (
-    CARD, acwr_color, fig_id, fmt_pace, kpi, panel, range_tabs, section,
-    section_with_control, tsb_color, with_info,
+    CARD,
+    acwr_color,
+    fig_id,
+    fmt_pace,
+    kpi,
+    panel,
+    range_tabs,
+    section,
+    section_with_control,
+    tsb_color,
+    with_info,
 )
 
 _TYPE_COLOR = {"easy": "teal", "long": "blue", "tempo": "orange",
@@ -127,8 +136,16 @@ def hero():
             if tgt and tgt != "—" else None,
         ]
     else:
-        next_body = [html.Div("No plan yet — set a goal in the Coach tab to get a "
-                              "scheduled workout here.", className="gc-hero-next-desc")]
+        st = plan_mod.phase_status(plan_mod.load_latest())
+        if st["block_finished"] and st["next_phase"]:
+            msg = (f"🎉 {st['current_phase']['phase']} phase done — building your "
+                   f"{st['next_phase']['phase']} plan. Open Training Plan.")
+        elif st["is_last"]:
+            msg = "🏁 Plan complete — set a new goal in ⚙ Settings."
+        else:
+            msg = ("No plan yet — set a goal in ⚙ Settings to get a scheduled "
+                   "workout here.")
+        next_body = [html.Div(msg, className="gc-hero-next-desc")]
     nxt = html.Div([
         html.Div("Next session", className="gc-hero-lab"),
         *next_body,
