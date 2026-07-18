@@ -233,10 +233,11 @@ def advance_phase(plan: dict | None = None, provider=None,
         f"debrief of the phase just finished: a one-line headline congratulating the athlete, "
         f"and 2-3 specific things to do better in this next phase, grounded in the data above."
     )
-    # Cap under the web server's request timeout so a slow/hung claude surfaces a
-    # retryable error instead of the worker being killed mid-request.
+    # Building a full 4-week block is a large structured generation. It runs off
+    # the web request (a background thread in the dashboard), so it isn't bound by
+    # the server's request timeout — allow up to 5 min, then fail with an error.
     res = provider.generate_json(prompt, ADVANCE_SCHEMA, system=SYSTEM, model=model,
-                                 timeout=150)
+                                 timeout=300)
     debrief = res.get("debrief") or {}
     # Re-anchor the returned weeks to consecutive Sun–Sat weeks from next_start, so
     # a stray date from the model can't leave the new block in the past (which would
