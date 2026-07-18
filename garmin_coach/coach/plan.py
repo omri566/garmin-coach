@@ -238,7 +238,14 @@ def advance_phase(plan: dict | None = None, provider=None,
     res = provider.generate_json(prompt, ADVANCE_SCHEMA, system=SYSTEM, model=model,
                                  timeout=150)
     debrief = res.get("debrief") or {}
-    plan["next_month"] = res.get("weeks") or []
+    # Re-anchor the returned weeks to consecutive Sun–Sat weeks from next_start, so
+    # a stray date from the model can't leave the new block in the past (which would
+    # read as "already finished" and auto-advance again in a loop).
+    weeks_new = res.get("weeks") or []
+    for i, wk in enumerate(weeks_new):
+        s = next_start + dt.timedelta(days=7 * i)
+        wk["week"] = f"Week {i + 1} ({s:%b %-d} – {s + dt.timedelta(days=6):%b %-d})"
+    plan["next_month"] = weeks_new
     plan["phase_index"] = status["next_index"]
     plan["phase_debrief"] = {
         "finished_phase": cur.get("phase", ""),

@@ -30,7 +30,7 @@ from dash.exceptions import PreventUpdate
 
 from garmin_coach.coach import plan as plan_mod
 from garmin_coach.coach import schedule
-from garmin_coach.dashboard import data, figures
+from garmin_coach.dashboard import data
 from garmin_coach.dashboard.ui import CARD, fmt_pace, section
 
 
@@ -395,17 +395,19 @@ def _macro_timeline(plan, today):
 
 
 def _phase_building_view(status):
-    """Shown the moment a phase finishes: a congrats card + a one-shot Interval
-    that fires the auto-advance callback to generate the next block."""
+    """Shown the moment a phase finishes: a congrats card (stays visible while the
+    LLM runs) + a one-shot Interval that fires the auto-advance callback."""
     cur = (status["current_phase"] or {}).get("phase", "this phase")
     nxt = (status["next_phase"] or {}).get("phase", "the next phase")
     return dmc.Stack([
         dcc.Interval(id="gc-phase-advance", interval=350, max_intervals=1),
-        dcc.Loading(dmc.Card([
-            dmc.Text(f"🎉 You finished the {cur} phase!", fw=800, size="lg"),
-            dmc.Text(f"Building your {nxt} plan — this takes a few seconds…",
-                     c="dimmed", size="sm", mt=6),
-        ], className="gc-card", radius="md", p="xl"), type="dot", color=figures.AMP),
+        dmc.Card([
+            dmc.Group([dmc.Loader(color="amp", size="sm"),
+                       dmc.Text(f"🎉 You finished the {cur} phase!", fw=800, size="lg")],
+                      gap="sm"),
+            dmc.Text(f"Building your {nxt} plan — this can take up to a minute.",
+                     c="dimmed", size="sm", mt=8),
+        ], className="gc-card", radius="md", p="xl"),
     ], gap="md")
 
 
@@ -467,9 +469,10 @@ def render_plan(plan):
 
 
 def layout():
-    return dcc.Loading(
-        html.Div(render_plan(plan_mod.load_latest()), id="coach-plan"),
-        delay_show=400)
+    # No dcc.Loading wrapper: while the phase-advance callback runs (a slow LLM
+    # call), coach-plan keeps showing the "building your next plan…" card instead
+    # of a bare full-tab spinner that reads as "stuck".
+    return html.Div(render_plan(plan_mod.load_latest()), id="coach-plan")
 
 
 # Arrow nav is entirely client-side: slide the pre-rendered carousel (transform)
@@ -553,17 +556,18 @@ def congrats_content(plan):
 
 def _advance_or_error(force=False):
     """Run advance_phase once and return (plan-view, overlay_class, congrats_body).
-    Guards against re-firing: if the phase index didn't move, the advance didn't
-    happen (LLM error / no next phase) — show a retryable error, don't loop."""
+    Everything is wrapped so a failure anywhere — the LLM call *or* rendering the
+    returned block (e.g. the model returns weeks that don't parse) — shows a
+    retryable error card instead of leaving the tab spinning forever."""
     try:
         before = (plan_mod.load_latest() or {}).get("phase_index", 0)
         plan = plan_mod.advance_phase(force=force)
-    except Exception as e:  # noqa: BLE001 — surface the reason, don't crash the tab
+        if not plan or plan.get("phase_index", 0) == before:
+            return _phase_error_view("The coach didn't return a valid next block."), \
+                no_update, no_update
+        return render_plan(plan), "gc-congrats-overlay open", congrats_content(plan)
+    except Exception as e:  # noqa: BLE001 — surface the reason, never hang the tab
         return _phase_error_view(f"{type(e).__name__}: {e}"), no_update, no_update
-    if not plan or plan.get("phase_index", 0) == before:
-        return _phase_error_view("The coach didn't return a valid next block."), \
-            no_update, no_update
-    return render_plan(plan), "gc-congrats-overlay open", congrats_content(plan)
 
 
 @callback(Output("coach-plan", "children", allow_duplicate=True),
