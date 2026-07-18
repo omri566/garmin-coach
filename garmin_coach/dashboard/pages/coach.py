@@ -437,6 +437,16 @@ def render_plan(plan):
     if status["is_last"]:
         return _plan_complete_view(plan)
     sched = schedule.build_schedule(plan)
+    # Manual escape hatch: if a next phase exists, let the athlete move on early
+    # (e.g. finished the work ahead of the calendar) — never stuck on a block.
+    manual = None
+    if status["next_phase"]:
+        manual = dmc.Group([
+            dmc.Button(f"Start {status['next_phase']['phase']} →",
+                       id="gc-phase-manual", variant="light", size="xs"),
+            dmc.Text(f"Done with {status['current_phase']['phase']}? Jump to the "
+                     "next phase now.", size="xs", c="dimmed"),
+        ], gap="sm", align="center", className="plan-advance-row")
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
         dcc.Store(id="plan-week-view",
@@ -452,6 +462,7 @@ def render_plan(plan):
         _week_nav(plan),
         section("The bigger picture"),
         _macro_timeline(plan, sched["today"]),
+        manual,
     ], gap="md")
 
 
@@ -540,13 +551,13 @@ def congrats_content(plan):
     return dmc.Stack(body, gap=6)
 
 
-def _advance_or_error():
+def _advance_or_error(force=False):
     """Run advance_phase once and return (plan-view, overlay_class, congrats_body).
     Guards against re-firing: if the phase index didn't move, the advance didn't
     happen (LLM error / no next phase) — show a retryable error, don't loop."""
     try:
         before = (plan_mod.load_latest() or {}).get("phase_index", 0)
-        plan = plan_mod.advance_phase()
+        plan = plan_mod.advance_phase(force=force)
     except Exception as e:  # noqa: BLE001 — surface the reason, don't crash the tab
         return _phase_error_view(f"{type(e).__name__}: {e}"), no_update, no_update
     if not plan or plan.get("phase_index", 0) == before:
@@ -570,3 +581,15 @@ def _do_advance(_n):
           Input("gc-phase-retry", "n_clicks"), prevent_initial_call=True)
 def _retry_advance(_n):
     return _advance_or_error()
+
+
+@callback(Output("coach-plan", "children", allow_duplicate=True),
+          Output("gc-congrats", "className", allow_duplicate=True),
+          Output("gc-congrats-body", "children", allow_duplicate=True),
+          Input("gc-phase-manual", "n_clicks"), prevent_initial_call=True)
+def _manual_advance(n):
+    """The 'Start next phase' button — advance now even if the block isn't
+    auto-detected as finished. Guarded against the inject-fires-callback gotcha."""
+    if not n:
+        raise PreventUpdate
+    return _advance_or_error(force=True)
