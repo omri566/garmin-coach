@@ -97,6 +97,49 @@ def test_advance_generates_next_block_and_debrief():
     assert again["phase_index"] == 1
 
 
+def _future_block_all_done(n=2):
+    """n training weeks starting *next* week (calendar not passed), every session
+    marked done — the 'finished the work early' case."""
+    from garmin_coach.coach.schedule import _week_start
+    start = _week_start(dt.date.today()) + dt.timedelta(days=7)
+    weeks, ov = [], {}
+    for i in range(n):
+        s = start + dt.timedelta(days=7 * i)
+        e = s + dt.timedelta(days=6)
+        weeks.append({"week": f"Week {i + 1} ({s:%b %-d} – {e:%b %-d})", "theme": "base",
+                      "sessions": [{"day": "Mon", "type": "easy", "description": "easy"}]})
+        ov[f"{i}:0"] = {"status": "done"}
+    return weeks, ov
+
+
+def test_finishing_the_work_early_advances_before_the_calendar():
+    weeks, ov = _future_block_all_done()
+    plan_mod.save_latest({"generated_at": f"{dt.date.today().isoformat()}T08:00:00",
+                          "goal": "g", "preferred_days": [], "overrides": ov,
+                          "macro": _MACRO, "next_month": weeks})
+    st = plan_mod.phase_status(plan_mod.load_latest())
+    assert st["block_finished"] is True          # all sessions done, calendar still future
+    fake = FakeProvider({"weeks": [{"week": "W", "theme": "build",
+                                    "sessions": [{"day": "Tue", "type": "tempo", "description": "t"}]}],
+                         "debrief": {"headline": "h", "improve": ["a"]}})
+    assert plan_mod.advance_phase(provider=fake)["phase_index"] == 1
+
+
+def test_force_advances_when_block_not_finished():
+    weeks, _ = _future_block_all_done()          # future weeks, but nothing done
+    plan_mod.save_latest({"generated_at": f"{dt.date.today().isoformat()}T08:00:00",
+                          "goal": "g", "preferred_days": [], "overrides": {},
+                          "macro": _MACRO, "next_month": weeks})
+    assert plan_mod.phase_status(plan_mod.load_latest())["block_finished"] is False
+    fake = FakeProvider({"weeks": [{"week": "W", "theme": "build",
+                                    "sessions": [{"day": "Tue", "type": "tempo", "description": "t"}]}],
+                         "debrief": {"headline": "h", "improve": ["a"]}})
+    assert plan_mod.advance_phase(provider=fake, force=False).get("phase_index", 0) in (0, None)
+    assert fake.calls == 0                        # no-op without force
+    assert plan_mod.advance_phase(provider=fake, force=True)["phase_index"] == 1
+    assert fake.calls == 1
+
+
 def test_last_phase_is_not_advanced():
     plan = _plan(_MACRO[:1])                             # only Base, no next phase
     plan_mod.save_latest(plan)
