@@ -31,6 +31,15 @@ def _short_title(title: str) -> str:
     return lead or (title or "")
 
 
+def _clip(text: str, n: int) -> str:
+    """Trim a coaching line to ~n chars at a word boundary so the popup stays short
+    and scannable — the coach speaks in a sentence, not a paragraph."""
+    t = " ".join((text or "").split())
+    if len(t) <= n:
+        return t
+    return t[:n].rsplit(" ", 1)[0].rstrip(",.;:—- ") + "…"
+
+
 def _top_recs(recs, limit=TIP_LIMIT):
     """The few most relevant tips — highest priority, nearest horizon first."""
     return sorted(recs, key=lambda r: (_PRIO_RANK.get(r.get("priority"), 3),
@@ -128,6 +137,11 @@ def _says_view():
     if not msgs:
         return dmc.Text("No coaching yet — tap “Refresh tips” to ask your coach.",
                         c="dimmed", size="sm")
+    # Keep every message short so the coach reads as a quick, focused note rather
+    # than a wall of text (applies to the lead bubble and the chip-swapped bodies).
+    for m in msgs:
+        m["head"] = _clip(m.get("head", ""), 80)
+        m["detail"] = _clip(m.get("detail", ""), 150)
     first = msgs[0]
     avatar = data.coach_avatar()
     av = (html.Img(src=avatar, className="gc-says-avimg") if avatar
