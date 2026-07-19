@@ -215,14 +215,32 @@ def _total_plan_weeks(plan):
     return total
 
 
+def _overall_progress(plan, sched):
+    """Percent of the WHOLE macro program completed. Accumulates across phases so
+    advancing into a new block keeps the bar climbing instead of resetting to 0:
+    counts the weeks of every phase *before* the current one (from its 'weeks a-b'
+    range) plus the weeks elapsed inside the current detailed block."""
+    total = _total_plan_weeks(plan)
+    if not total:
+        return 0
+    weeks, today = sched["weeks"], sched["today"]
+    macro, idx = plan.get("macro", []), plan.get("phase_index", 0)
+    before = 0
+    if 0 <= idx < len(macro):
+        nums = re.findall(r"\d+", macro[idx].get("weeks", "").split("(")[0])
+        if nums:
+            before = max(0, int(nums[0]) - 1)         # 'weeks 5-8' → 4 weeks already done
+    into = 0
+    if weeks:
+        into = min(len(weeks), max(0, (today - weeks[0]["start"]).days // 7))
+    return round(100 * min(total, before + into) / total)
+
+
 def _progress_hero(plan, sched, streak):
     weeks, cur, today = sched["weeks"], sched["current_index"], sched["today"]
-    # "Plan complete" spans the whole macro plan (e.g. 16 weeks), not just the few
-    # detailed next_month weeks — measured by weeks elapsed since the plan began.
-    total_weeks = _total_plan_weeks(plan) or len(weeks)
-    plan_start = weeks[0]["start"] if weeks else today
-    weeks_done = max(0, min(total_weeks, (today - plan_start).days // 7))
-    pct = round(100 * weeks_done / total_weeks) if total_weeks else 0
+    # "Plan complete" spans the whole macro program (e.g. 16 weeks) and accumulates
+    # across phases, so advancing into a new block keeps climbing (never resets to 0).
+    pct = _overall_progress(plan, sched)
     this = weeks[cur] if weeks else None
     tdone, ttotal = (this["done"], this["total"]) if this else (0, 0)
     if ttotal and tdone >= ttotal:
@@ -232,18 +250,12 @@ def _progress_hero(plan, sched, streak):
         enc = f"{left} session{'s' if left != 1 else ''} to go this week — you've got this."
     else:
         enc = "Let's get moving."
-    fit = data.fitness_progress(plan.get("generated_at"))
-
+    # Fitness-since-start now lives in the milestones grid below (see _milestones),
+    # so the hero keeps just the streak chip.
     chips = []
     if streak >= 2:
         chips.append(html.Div(["🔥 ", html.B(f"{streak}"), "-week streak"],
                               className="gc-hero-chip hot"))
-    if fit and fit.get("delta") is not None and abs(fit["delta"]) >= 1:
-        up = fit["delta"] >= 0
-        chips.append(html.Div([("▲ " if up else "▼ "), "Fitness ",
-                               html.B(f"{'+' if up else ''}{fit['delta']:.0f}"),
-                               " since you started"],
-                              className="gc-hero-chip" + (" good" if up else "")))
 
     left_col = html.Div([
         html.Div(_countdown(plan.get("goal_date"), today), className="gc-hero-eyebrow"),
@@ -303,12 +315,16 @@ def _today_card(sched):
 def _milestones(plan, sched, streak):
     hl = data.activity_highlights(sched["today"])
     month_km = hl["month_km"]
-    nxt = 50 * (int(month_km) // 50 + 1)        # next 50 km band this month
+    # Fitness (CTL) earned since the program began — generated_at is the original
+    # program start and is preserved across phase advances, so this spans the whole plan.
+    fit = data.fitness_progress(plan.get("generated_at"))
+    delta = fit.get("delta") if fit else None
+    fit_val = f"{'+' if delta >= 0 else ''}{delta:.0f}" if delta is not None else "—"
     chips = [
         ("🏅", "Longest run", f"{hl['longest_km']:.1f} km"),
         ("📅", "This month", f"{month_km:.0f} km"),
         ("🔥", "Streak", f"{streak} wk" if streak else "—"),
-        ("🎯", "Next up", f"{nxt - month_km:.0f} km to {nxt}"),
+        ("💪", "Fitness gained", fit_val),
     ]
     return html.Div([
         html.Div([html.Span(icon, className="ic"),
@@ -444,16 +460,8 @@ def render_plan(plan):
     if status["is_last"]:
         return _plan_complete_view(plan)
     sched = schedule.build_schedule(plan)
-    # Manual escape hatch: if a next phase exists, let the athlete move on early
-    # (e.g. finished the work ahead of the calendar) — never stuck on a block.
-    manual = None
-    if status["next_phase"]:
-        manual = dmc.Group([
-            dmc.Button(f"Start {status['next_phase']['phase']} →",
-                       id="gc-phase-manual", variant="light", size="xs"),
-            dmc.Text(f"Done with {status['current_phase']['phase']}? Jump to the "
-                     "next phase now.", size="xs", c="dimmed"),
-        ], gap="sm", align="center", className="plan-advance-row")
+    # No manual "start next phase" button: auto-advance fires as soon as the block
+    # is finished (calendar passed OR all work done), so it's never needed.
     return dmc.Stack([
         dcc.Store(id="plan-dnd-store"),
         dcc.Store(id="plan-week-view",
@@ -469,7 +477,6 @@ def render_plan(plan):
         _week_nav(plan),
         section("The bigger picture"),
         _macro_timeline(plan, sched["today"]),
-        manual,
     ], gap="md")
 
 
@@ -645,16 +652,6 @@ def _phase_tick(_n, force):
 @callback(Output("coach-plan", "children", allow_duplicate=True),
           Input("gc-phase-retry", "n_clicks"), prevent_initial_call=True)
 def _retry_advance(n):
-    if not n:
-        raise PreventUpdate
-    return _phase_building_view(plan_mod.phase_status(plan_mod.load_latest()), force=True)
-
-
-@callback(Output("coach-plan", "children", allow_duplicate=True),
-          Input("gc-phase-manual", "n_clicks"), prevent_initial_call=True)
-def _manual_advance(n):
-    """The 'Start next phase' button — kick off a (background) advance now, even if
-    the block isn't auto-detected as finished. Guarded against the inject gotcha."""
     if not n:
         raise PreventUpdate
     return _phase_building_view(plan_mod.phase_status(plan_mod.load_latest()), force=True)
