@@ -27,7 +27,8 @@ log = logging.getLogger(__name__)
 
 def update(examine: int = 50, health_days: int = 14,
            refresh_profile: bool = True,
-           refresh_recommendations: bool = True) -> None:
+           refresh_recommendations: bool = True,
+           advance_plan: bool = True) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = get_client()
 
@@ -55,6 +56,28 @@ def update(examine: int = 50, health_days: int = 14,
         except Exception as exc:  # noqa: BLE001 - never fail the data update on LLM
             log.warning("  recommendations skipped: %s", exc)
 
+    # Pre-build the next training phase *here*, on the server, where the LLM runs
+    # for real and there's no web-request timeout. `advance_phase` is a no-op unless
+    # the current 4-week block is finished (calendar passed OR all work done) and a
+    # next macro phase exists — so calling it every run is safe and idempotent. When
+    # it does fire, the detailed next block is already in place the moment the athlete
+    # opens the app: no on-demand "building your next phase…" spinner, just the new
+    # weeks + a congrats. (The dashboard keeps an on-demand path as a fallback for
+    # finishing a block between nightly runs.)
+    if advance_plan:
+        log.info("→ pre-building the next training phase if the block is finished…")
+        try:
+            from garmin_coach.coach import plan as plan_mod
+            before = (plan_mod.load_latest() or {}).get("phase_index", 0)
+            new = plan_mod.advance_phase()
+            after = (new or {}).get("phase_index", 0)
+            if after != before:
+                log.info("  ✓ advanced to phase_index=%d — next block ready.", after)
+            else:
+                log.info("  (block not finished or no next phase — nothing to do)")
+        except Exception as exc:  # noqa: BLE001 - never fail the data update on LLM
+            log.warning("  next-phase pre-generation skipped: %s", exc)
+
     log.info("✓ update complete.")
 
 
@@ -67,10 +90,13 @@ def main() -> None:
                    help="Skip re-fetching the athlete profile.")
     p.add_argument("--no-recommend", action="store_true",
                    help="Skip refreshing recommendations (data only).")
+    p.add_argument("--no-advance", action="store_true",
+                   help="Skip pre-building the next training phase when a block is finished.")
     args = p.parse_args()
     update(examine=args.examine, health_days=args.health_days,
            refresh_profile=not args.no_profile,
-           refresh_recommendations=not args.no_recommend)
+           refresh_recommendations=not args.no_recommend,
+           advance_plan=not args.no_advance)
 
 
 if __name__ == "__main__":

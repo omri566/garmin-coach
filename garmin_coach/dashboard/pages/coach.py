@@ -565,7 +565,9 @@ def congrats_content(plan):
 # gunicorn runs more than one worker (each worker has its own memory, which would
 # otherwise make the poll never see completion → endless 'building…').
 _ADVANCE_STATUS = config.DATA_DIR / "plans" / "advance_status.json"
-_ADVANCE_MAX_S = 330            # hard cap: past this, stop 'building…' and error out
+_ADVANCE_MAX_S = 660            # hard cap: past this, stop 'building…' and error out
+#                                 (> the 600s CLI timeout in plan.advance_phase, so the
+#                                 poll never gives up before the generation itself does)
 _advance_lock = threading.Lock()
 
 
