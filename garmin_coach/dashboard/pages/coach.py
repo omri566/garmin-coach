@@ -10,6 +10,7 @@ from here, so keep them importable.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 import threading
 
@@ -29,6 +30,7 @@ from dash import (
 )
 from dash.exceptions import PreventUpdate
 
+from garmin_coach import config
 from garmin_coach.coach import plan as plan_mod
 from garmin_coach.coach import schedule
 from garmin_coach.dashboard import data
@@ -558,28 +560,51 @@ def congrats_content(plan):
 
 
 # The next-phase generation is a big, slow LLM call — run it in a background thread
-# (single-user, single gunicorn worker, so a module-level status is safe) and poll
-# from the UI, so it never blocks the request thread or trips the server timeout.
+# and poll from the UI, so it never blocks the request thread or trips the server
+# timeout. Status is kept **on disk** (not just in memory) so it works even if
+# gunicorn runs more than one worker (each worker has its own memory, which would
+# otherwise make the poll never see completion → endless 'building…').
+_ADVANCE_STATUS = config.DATA_DIR / "plans" / "advance_status.json"
+_ADVANCE_MAX_S = 330            # hard cap: past this, stop 'building…' and error out
 _advance_lock = threading.Lock()
-_advance_state = {"status": "idle", "error": None}
+
+
+def _read_advance():
+    try:
+        return json.loads(_ADVANCE_STATUS.read_text())
+    except Exception:  # noqa: BLE001 — missing/corrupt ⇒ idle
+        return {"state": "idle"}
+
+
+def _write_advance(state, error=None):
+    _ADVANCE_STATUS.parent.mkdir(parents=True, exist_ok=True)
+    _ADVANCE_STATUS.write_text(json.dumps(
+        {"state": state, "error": error, "ts": dt.datetime.now().isoformat()}))
+
+
+def _advance_age(st):
+    try:
+        return (dt.datetime.now() - dt.datetime.fromisoformat(st["ts"])).total_seconds()
+    except Exception:  # noqa: BLE001
+        return 1e9
 
 
 def _start_advance(force):
     with _advance_lock:
-        if _advance_state["status"] == "running":
-            return
-        _advance_state.update(status="running", error=None)
+        st = _read_advance()
+        if st.get("state") == "running" and _advance_age(st) < _ADVANCE_MAX_S:
+            return                                   # a fresh run is already going
+        _write_advance("running")
 
     def _work():
         try:
             before = (plan_mod.load_latest() or {}).get("phase_index", 0)
             plan = plan_mod.advance_phase(force=force)
             ok = bool(plan) and plan.get("phase_index", 0) != before
-            _advance_state.update(
-                status="done" if ok else "error",
-                error=None if ok else "The coach didn't return a valid next block.")
+            _write_advance("done" if ok else "error",
+                           None if ok else "The coach didn't return a valid next block.")
         except Exception as e:  # noqa: BLE001 — captured for the poll to surface
-            _advance_state.update(status="error", error=f"{type(e).__name__}: {e}")
+            _write_advance("error", f"{type(e).__name__}: {e}")
 
     threading.Thread(target=_work, daemon=True).start()
 
@@ -591,21 +616,28 @@ def _start_advance(force):
           State("gc-phase-force", "data"), prevent_initial_call=True)
 def _phase_tick(_n, force):
     """Poll the background advance: kick it off on the first tick, keep showing
-    'building…' while it runs, then swap in the new plan + congrats (or an error)."""
-    st = _advance_state["status"]
-    if st == "idle":
+    'building…' while it runs, then swap in the new plan + congrats (or an error).
+    Never loads forever — a stuck 'running' past the cap becomes an error card."""
+    st = _read_advance()
+    state = st.get("state", "idle")
+    if state == "idle":
         _start_advance(bool(force))
         raise PreventUpdate
-    if st == "running":
+    if state == "running":
+        if _advance_age(st) > _ADVANCE_MAX_S:
+            _write_advance("idle")
+            return _phase_error_view(
+                "Building your next phase is taking too long — the coach may be "
+                "unreachable. Check the server, then Try again."), no_update, no_update
         raise PreventUpdate
-    if st == "done":
-        _advance_state.update(status="idle")
+    if state == "done":
+        _write_advance("idle")
         plan = plan_mod.load_latest()
         return render_plan(plan), "gc-congrats-overlay open", congrats_content(plan)
     # error
-    msg = _advance_state.get("error") or "Couldn't build your next phase."
-    _advance_state.update(status="idle")
-    return _phase_error_view(msg), no_update, no_update
+    _write_advance("idle")
+    return _phase_error_view(st.get("error") or "Couldn't build your next phase."), \
+        no_update, no_update
 
 
 @callback(Output("coach-plan", "children", allow_duplicate=True),
