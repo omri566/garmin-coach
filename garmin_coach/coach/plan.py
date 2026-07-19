@@ -233,11 +233,14 @@ def advance_phase(plan: dict | None = None, provider=None,
         f"debrief of the phase just finished: a one-line headline congratulating the athlete, "
         f"and 2-3 specific things to do better in this next phase, grounded in the data above."
     )
-    # Building a full 4-week block is a large structured generation. It runs off
-    # the web request (a background thread in the dashboard), so it isn't bound by
-    # the server's request timeout — allow up to 5 min, then fail with an error.
+    # Building a full 4-week block is a large structured generation that regularly
+    # takes several minutes through the Claude Code CLI — the 300s cap this used to
+    # carry was cutting it off mid-generation ("claude CLI timed out after 300s").
+    # It always runs off the web request (the nightly pipeline, or a background
+    # thread in the dashboard), so it isn't bound by the server's request timeout —
+    # give it the same 600s headroom as make_plan, then fail with an error.
     res = provider.generate_json(prompt, ADVANCE_SCHEMA, system=SYSTEM, model=model,
-                                 timeout=300)
+                                 timeout=600)
     debrief = res.get("debrief") or {}
     # Re-anchor the returned weeks to consecutive Sun–Sat weeks from next_start, so
     # a stray date from the model can't leave the new block in the past (which would
