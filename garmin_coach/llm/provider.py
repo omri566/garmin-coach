@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import signal
 import subprocess
+import tempfile
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -78,6 +82,55 @@ class ClaudeCodeProvider(LLMProvider):
         self.binary = binary
         self.default_model = default_model
 
+    def _exec(self, cmd: list[str], prompt: str,
+              timeout: int) -> tuple[int, str, str, float]:
+        """Run `cmd` with `prompt` on stdin, capturing stdout/stderr to temp
+        **files** rather than pipes, and wait only on the CLI's own exit.
+
+        This is deliberate and load-bearing. `subprocess.run(capture_output=True)`
+        reads the stdout/stderr *pipes* until EOF — which only arrives once every
+        process holding the write end has exited. The Claude Code CLI routinely
+        forks short-lived children (update check, tool/IPC helpers, node workers)
+        that inherit those pipe fds; if one lingers a moment after `claude` prints
+        its JSON and exits, the pipe never reaches EOF and the read blocks until the
+        timeout — so a generation that finished in seconds looks like "claude CLI
+        timed out after Ns". Writing to files removes the pipe (nothing to reach EOF
+        on), so a leftover child can't wedge us. `start_new_session=True` lets a real
+        timeout kill the whole process group. Returns (rc, stdout, stderr, seconds).
+        """
+        with tempfile.TemporaryFile("w+") as fin, \
+                tempfile.TemporaryFile("w+") as fout, \
+                tempfile.TemporaryFile("w+") as ferr:
+            fin.write(prompt)
+            fin.seek(0)
+            t0 = time.monotonic()
+            proc = subprocess.Popen(cmd, stdin=fin, stdout=fout, stderr=ferr,
+                                    text=True, start_new_session=True)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self._kill_group(proc)
+                ferr.seek(0)
+                log.warning("claude CLI hit %ss timeout — killed; stderr tail: %r",
+                            timeout, ferr.read()[-500:])
+                raise LLMError(f"claude CLI timed out after {timeout}s")
+            elapsed = time.monotonic() - t0
+            fout.seek(0)
+            ferr.seek(0)
+            return proc.returncode, fout.read(), ferr.read(), elapsed
+
+    @staticmethod
+    def _kill_group(proc: subprocess.Popen) -> None:
+        """SIGKILL the CLI's whole process group so no inherited child survives."""
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+
     def _run(self, prompt: str, system: str | None, model: str | None,
              allow_web: bool, timeout: int, schema: dict | None) -> str:
         cmd = [self.binary, "-p", "--output-format", "json"]
@@ -93,19 +146,16 @@ class ClaudeCodeProvider(LLMProvider):
             # No tools needed for pure reasoning over provided data.
             cmd += ["--disallowed-tools", "Bash", "Edit", "Write"]
 
-        try:
-            proc = subprocess.run(
-                cmd, input=prompt, capture_output=True, text=True, timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise LLMError(f"claude CLI timed out after {timeout}s") from e
-        if proc.returncode != 0:
-            raise LLMError(f"claude CLI failed ({proc.returncode}): {proc.stderr[:500]}")
+        returncode, out, err, elapsed = self._exec(cmd, prompt, timeout)
+        log.info("claude CLI finished in %.1fs (rc=%s, %d chars out)",
+                 elapsed, returncode, len(out))
+        if returncode != 0:
+            raise LLMError(f"claude CLI failed ({returncode}): {err[:500]}")
 
         try:
-            envelope = json.loads(proc.stdout)
+            envelope = json.loads(out)
         except json.JSONDecodeError as e:
-            raise LLMError(f"non-JSON CLI output: {proc.stdout[:300]}") from e
+            raise LLMError(f"non-JSON CLI output: {out[:300]}") from e
         if envelope.get("is_error"):
             raise LLMError(f"claude returned error: {envelope.get('result')}")
         return envelope.get("result", "")

@@ -4,6 +4,26 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## LLM provider — CLI subprocess must capture to files, not pipes
+
+`llm/provider.ClaudeCodeProvider` shells out to the `claude` CLI. **Never capture
+its output with `subprocess.run(capture_output=True)` / pipes.** `communicate()`
+reads the stdout/stderr pipes until **EOF**, which only arrives once *every*
+process holding the write end has exited — and the Claude Code CLI forks
+short-lived children (update check, tool/IPC helpers, node/ripgrep workers) that
+**inherit** those pipe fds. If one lingers a moment after `claude` prints its JSON
+and exits, the pipe never reaches EOF and the read blocks until the `timeout` —
+so a generation that finished in ~20s looks like `LLMError: claude CLI timed out
+after Ns`. This bit the phase-advance plan generation hard (always failed at the
+timeout cap, never at ~200s — the tell for a deadlock vs. slow generation).
+
+`_exec` writes stdin/stdout/stderr to **temp files** and waits on the CLI's *own*
+exit (`Popen.wait(timeout=…)`, `start_new_session=True` so a real timeout can
+`killpg` the whole group). With no pipe there is no EOF to wait on, so a leftover
+child can't wedge us. See `test_llm_provider.py::test_exec_returns_output_even_if_
+a_child_holds_the_pipe` (a real `/bin/sh` that backgrounds a child holding stdout).
+Keep new CLI plumbing on `_exec`.
+
 ## Dashboard charts — date x-axis gotcha
 
 `analytics.trends.rolling_metric` (and the trends built on it: `efficiency_trend`,
