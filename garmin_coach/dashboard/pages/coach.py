@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import threading
 
 import dash_mantine_components as dmc
 from dash import (
@@ -394,18 +395,20 @@ def _macro_timeline(plan, today):
     return html.Div(nodes, className="gc-phase-timeline")
 
 
-def _phase_building_view(status):
-    """Shown the moment a phase finishes: a congrats card (stays visible while the
-    LLM runs) + a one-shot Interval that fires the auto-advance callback."""
-    cur = (status["current_phase"] or {}).get("phase", "this phase")
-    nxt = (status["next_phase"] or {}).get("phase", "the next phase")
+def _phase_building_view(status, force=False):
+    """Shown while the next block is generated. The generation runs in a background
+    thread (see _start_advance); a poll Interval swaps in the result when ready, so
+    a slow LLM call never blocks the request thread / hits the server timeout."""
+    cur = (status.get("current_phase") or {}).get("phase", "this phase")
+    nxt = (status.get("next_phase") or {}).get("phase", "the next phase")
     return dmc.Stack([
-        dcc.Interval(id="gc-phase-advance", interval=350, max_intervals=1),
+        dcc.Store(id="gc-phase-force", data=force),
+        dcc.Interval(id="gc-phase-poll", interval=2000),
         dmc.Card([
             dmc.Group([dmc.Loader(color="amp", size="sm"),
                        dmc.Text(f"🎉 You finished the {cur} phase!", fw=800, size="lg")],
                       gap="sm"),
-            dmc.Text(f"Building your {nxt} plan — this can take up to a minute.",
+            dmc.Text(f"Building your {nxt} plan — this can take a minute…",
                      c="dimmed", size="sm", mt=8),
         ], className="gc-card", radius="md", p="xl"),
     ], gap="md")
@@ -435,7 +438,7 @@ def render_plan(plan):
                       "settings, and click Generate plan.")
     status = plan_mod.phase_status(plan)
     if status["block_finished"] and status["next_phase"]:
-        return _phase_building_view(status)      # auto-advance to the next phase
+        return _phase_building_view(status)      # auto-advance (background) to next phase
     if status["is_last"]:
         return _plan_complete_view(plan)
     sched = schedule.build_schedule(plan)
@@ -554,46 +557,70 @@ def congrats_content(plan):
     return dmc.Stack(body, gap=6)
 
 
-def _advance_or_error(force=False):
-    """Run advance_phase once and return (plan-view, overlay_class, congrats_body).
-    Everything is wrapped so a failure anywhere — the LLM call *or* rendering the
-    returned block (e.g. the model returns weeks that don't parse) — shows a
-    retryable error card instead of leaving the tab spinning forever."""
-    try:
-        before = (plan_mod.load_latest() or {}).get("phase_index", 0)
-        plan = plan_mod.advance_phase(force=force)
-        if not plan or plan.get("phase_index", 0) == before:
-            return _phase_error_view("The coach didn't return a valid next block."), \
-                no_update, no_update
+# The next-phase generation is a big, slow LLM call — run it in a background thread
+# (single-user, single gunicorn worker, so a module-level status is safe) and poll
+# from the UI, so it never blocks the request thread or trips the server timeout.
+_advance_lock = threading.Lock()
+_advance_state = {"status": "idle", "error": None}
+
+
+def _start_advance(force):
+    with _advance_lock:
+        if _advance_state["status"] == "running":
+            return
+        _advance_state.update(status="running", error=None)
+
+    def _work():
+        try:
+            before = (plan_mod.load_latest() or {}).get("phase_index", 0)
+            plan = plan_mod.advance_phase(force=force)
+            ok = bool(plan) and plan.get("phase_index", 0) != before
+            _advance_state.update(
+                status="done" if ok else "error",
+                error=None if ok else "The coach didn't return a valid next block.")
+        except Exception as e:  # noqa: BLE001 — captured for the poll to surface
+            _advance_state.update(status="error", error=f"{type(e).__name__}: {e}")
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
+@callback(Output("coach-plan", "children", allow_duplicate=True),
+          Output("gc-congrats", "className", allow_duplicate=True),
+          Output("gc-congrats-body", "children", allow_duplicate=True),
+          Input("gc-phase-poll", "n_intervals"),
+          State("gc-phase-force", "data"), prevent_initial_call=True)
+def _phase_tick(_n, force):
+    """Poll the background advance: kick it off on the first tick, keep showing
+    'building…' while it runs, then swap in the new plan + congrats (or an error)."""
+    st = _advance_state["status"]
+    if st == "idle":
+        _start_advance(bool(force))
+        raise PreventUpdate
+    if st == "running":
+        raise PreventUpdate
+    if st == "done":
+        _advance_state.update(status="idle")
+        plan = plan_mod.load_latest()
         return render_plan(plan), "gc-congrats-overlay open", congrats_content(plan)
-    except Exception as e:  # noqa: BLE001 — surface the reason, never hang the tab
-        return _phase_error_view(f"{type(e).__name__}: {e}"), no_update, no_update
+    # error
+    msg = _advance_state.get("error") or "Couldn't build your next phase."
+    _advance_state.update(status="idle")
+    return _phase_error_view(msg), no_update, no_update
 
 
 @callback(Output("coach-plan", "children", allow_duplicate=True),
-          Output("gc-congrats", "className", allow_duplicate=True),
-          Output("gc-congrats-body", "children", allow_duplicate=True),
-          Input("gc-phase-advance", "n_intervals"), prevent_initial_call=True)
-def _do_advance(_n):
-    """Fires once when the 'building…' view mounts (a finished phase was detected)."""
-    return _advance_or_error()
-
-
-@callback(Output("coach-plan", "children", allow_duplicate=True),
-          Output("gc-congrats", "className", allow_duplicate=True),
-          Output("gc-congrats-body", "children", allow_duplicate=True),
           Input("gc-phase-retry", "n_clicks"), prevent_initial_call=True)
-def _retry_advance(_n):
-    return _advance_or_error()
-
-
-@callback(Output("coach-plan", "children", allow_duplicate=True),
-          Output("gc-congrats", "className", allow_duplicate=True),
-          Output("gc-congrats-body", "children", allow_duplicate=True),
-          Input("gc-phase-manual", "n_clicks"), prevent_initial_call=True)
-def _manual_advance(n):
-    """The 'Start next phase' button — advance now even if the block isn't
-    auto-detected as finished. Guarded against the inject-fires-callback gotcha."""
+def _retry_advance(n):
     if not n:
         raise PreventUpdate
-    return _advance_or_error(force=True)
+    return _phase_building_view(plan_mod.phase_status(plan_mod.load_latest()), force=True)
+
+
+@callback(Output("coach-plan", "children", allow_duplicate=True),
+          Input("gc-phase-manual", "n_clicks"), prevent_initial_call=True)
+def _manual_advance(n):
+    """The 'Start next phase' button — kick off a (background) advance now, even if
+    the block isn't auto-detected as finished. Guarded against the inject gotcha."""
+    if not n:
+        raise PreventUpdate
+    return _phase_building_view(plan_mod.phase_status(plan_mod.load_latest()), force=True)
