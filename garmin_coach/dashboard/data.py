@@ -198,6 +198,19 @@ def latest_vo2max() -> float | None:
     return row[0] if row else None
 
 
+def effective_vo2max() -> float | None:
+    """VO₂max for the headline KPI: Garmin's profile estimate — the number shown on
+    the watch — with a manual override winning, falling back to the most recent
+    qualifying activity only if the profile has none. (A single run's `vO2MaxValue`
+    lags Garmin's rolling profile estimate, so it can read a point or two off.)"""
+    from garmin_coach import profile as prof
+    try:
+        v = prof.load_profile().vo2max
+    except FileNotFoundError:            # no profile synced yet
+        v = None
+    return v if v is not None else latest_vo2max()
+
+
 def run_options(limit: int = 100) -> list[dict]:
     """Recent runs for the activity selector (label/value pairs)."""
     with db.connect() as conn:
