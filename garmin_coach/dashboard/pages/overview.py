@@ -199,11 +199,14 @@ def _ticker_to_coach(n):
 
 def kpi_row():
     st = data.current_state()
-    vo2 = data.latest_vo2max()
+    vo2 = data.effective_vo2max()
     cards = [
         kpi("Fitness · CTL", f"{st.get('ctl','—')}", "chronic load (42d)", figures.BLUE, "ctl"),
         kpi("Fatigue · ATL", f"{st.get('atl','—')}", "acute load (7d)", figures.ORANGE, "atl"),
-        kpi("Form · TSB", f"{st.get('tsb','—')}", "fitness − fatigue",
+        # Form is the classic TSB: *yesterday's* fitness − fatigue (freshness going
+        # into today, before today's session counts) — so it won't equal today's
+        # CTL − ATL shown in the two cards to its left.
+        kpi("Form · TSB", f"{st.get('tsb','—')}", "yesterday's fitness − fatigue",
             tsb_color(st.get("tsb")), "tsb"),
         kpi("ACWR", f"{st.get('acwr','—')}", "sweet spot 0.8–1.3",
             acwr_color(st.get("acwr")), "acwr"),

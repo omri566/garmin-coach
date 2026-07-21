@@ -92,12 +92,21 @@ def sync_day(client: Garmin, day: str, overwrite: bool) -> bool:
 
 
 def sync_health(client: Garmin, start: dt.date, end: dt.date,
-                overwrite: bool = False, pause: float = 0.3) -> int:
+                overwrite: bool = False, pause: float = 0.3,
+                recent_days: int = 3) -> int:
+    """Sync [start, end]. Days already holding a metric are skipped (incremental) —
+    EXCEPT the most recent `recent_days`, which are always re-fetched. Garmin
+    finalizes overnight metrics (sleep, HRV, readiness) hours apart, so a day first
+    written when only some metrics existed would otherwise be 'locked' by
+    `health_day_has_data` and never backfill last night's sleep. Re-pulling the
+    trailing window each run fills those in."""
     db.init_db()
     n = 0
+    recent_cutoff = end - dt.timedelta(days=max(0, recent_days - 1))
     day = start
     while day <= end:
-        if sync_day(client, day.isoformat(), overwrite):
+        force = overwrite or day >= recent_cutoff
+        if sync_day(client, day.isoformat(), force):
             n += 1
             time.sleep(pause)  # be polite to Garmin
         day += dt.timedelta(days=1)
