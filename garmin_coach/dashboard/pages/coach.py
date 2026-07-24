@@ -177,31 +177,29 @@ def _week_nav(plan):
     ], className="plan-week-nav")
 
 
-def _countdown(goal_date, today):
-    if not goal_date:
-        return "No race date set"
+def _days_to_race(goal_date, today):
+    """Whole days until race day, or None if there's no valid date."""
     try:
-        d = dt.date.fromisoformat(goal_date)
+        return (dt.date.fromisoformat(goal_date) - today).days
     except (ValueError, TypeError):
-        return "No race date set"
-    days = (d - today).days
-    if days > 7:
-        wks = days // 7
-        return f"{wks} weeks to race day"
-    if days > 0:
-        return f"{days} day{'s' if days != 1 else ''} to race day"
-    if days == 0:
-        return "Race day is today 🏁"
-    return "Race day has passed"
+        return None
 
 
-def _ring(pct, color, caption):
+def _stat(label, value, small=None):
+    """One compact stat tile (mono value + small unit) for the plan stat rail."""
     return html.Div([
-        dmc.RingProgress(size=92, thickness=9, roundCaps=True,
-                         sections=[{"value": max(0, min(100, pct)), "color": color}],
-                         label=dmc.Text(f"{pct}%", ta="center", fw=700, size="sm")),
-        html.Div(caption, className="gc-ring-cap"),
-    ], className="gc-ring")
+        html.Div(label, className="k"),
+        html.Div([str(value), html.Small(small)] if small else str(value),
+                 className="v"),
+    ], className="gc-stat")
+
+
+def _week_enc(this):
+    """Short one-liner on this week's remaining sessions, for the goal line."""
+    if not this or not this.get("total"):
+        return ""
+    left = this["total"] - this["done"]
+    return "This week's done 🎉" if left <= 0 else f"{left} to go this week"
 
 
 def _total_plan_weeks(plan):
@@ -236,38 +234,46 @@ def _overall_progress(plan, sched):
     return round(100 * min(total, before + into) / total)
 
 
-def _progress_hero(plan, sched, streak):
+def _stat_rail(plan, sched):
+    """Compact stat tiles that replace the old two-ring hero: a slim goal line plus
+    race-day countdown, whole-program progress, and this week's completion. Both ring
+    metrics (plan complete + this week) are kept as tiles — see the .lavish plan-cards
+    redesign (option C)."""
     weeks, cur, today = sched["weeks"], sched["current_index"], sched["today"]
-    # "Plan complete" spans the whole macro program (e.g. 16 weeks) and accumulates
-    # across phases, so advancing into a new block keeps climbing (never resets to 0).
-    pct = _overall_progress(plan, sched)
     this = weeks[cur] if weeks else None
     tdone, ttotal = (this["done"], this["total"]) if this else (0, 0)
-    if ttotal and tdone >= ttotal:
-        enc = "This week's done — great work! 🎉"
-    elif ttotal:
-        left = ttotal - tdone
-        enc = f"{left} session{'s' if left != 1 else ''} to go this week — you've got this."
-    else:
-        enc = "Let's get moving."
-    # Fitness-since-start now lives in the milestones grid below (see _milestones),
-    # so the hero keeps just the streak chip.
-    chips = []
-    if streak >= 2:
-        chips.append(html.Div(["🔥 ", html.B(f"{streak}"), "-week streak"],
-                              className="gc-hero-chip hot"))
+    week_pct = round(100 * tdone / ttotal) if ttotal else 0
 
-    left_col = html.Div([
-        html.Div(_countdown(plan.get("goal_date"), today), className="gc-hero-eyebrow"),
-        html.Div(plan.get("goal", "Your plan"), className="gc-hero-goal"),
-        html.Div(enc, className="gc-hero-enc"),
-        html.Div(chips, className="gc-hero-chips") if chips else None,
-    ], className="gc-hero-left")
-    rings = html.Div([
-        _ring(pct, "amp", "plan complete"),
-        _ring(round(100 * tdone / ttotal) if ttotal else 0, "teal", "this week"),
-    ], className="gc-hero-rings")
-    return html.Div([left_col, rings], className="gc-plan-hero")
+    days = _days_to_race(plan.get("goal_date"), today)
+    if days is None:
+        race = _stat("◷ Race day", "—", " no date")
+    elif days > 0:
+        race = _stat("◷ Race day", days, " days")
+    elif days == 0:
+        race = _stat("◷ Race day", "Today", " 🏁")
+    else:
+        race = _stat("◷ Race day", "—", " passed")
+
+    head = html.Div([
+        html.Span(plan.get("goal", "Your plan"), className="gc-rail-goal"),
+        html.Span(_week_enc(this), className="gc-rail-enc"),
+    ], className="gc-rail-head")
+    tiles = html.Div([
+        race,
+        _stat("▤ Plan complete", _overall_progress(plan, sched), "%"),
+        _stat("▦ This week", week_pct, "%"),
+    ], className="gc-stat-rail")
+    return html.Div([head, tiles], className="gc-rail")
+
+
+def _split_desc(desc):
+    """Split a session description into a short lead + the rest, so the card shows
+    '6 km tempo' big with '4 km @ threshold…' as a one-line note underneath."""
+    for sep in (" — ", " – ", " - ", ": "):
+        if sep in desc:
+            head, rest = desc.split(sep, 1)
+            return head.strip(), rest.strip()
+    return desc.strip(), ""
 
 
 def _today_card(sched):
@@ -289,27 +295,31 @@ def _today_card(sched):
                           else f"{s['date']:%a %b %-d}"), False
     else:
         return html.Div([
-            html.Div("Nice — nothing left to do", className="gc-today-when"),
+            html.Div("Nice — nothing left to do", className="gc-focus-ttl"),
             html.Div("You're all caught up. Set a new goal when you're ready.",
-                     className="gc-today-desc"),
-        ], className="gc-today done")
+                     className="gc-focus-sub"),
+        ], className="gc-focus done")
 
     typ = (s["type"] or "").lower()
+    title, sub = _split_desc(s.get("description", ""))
+    foot = []
+    if s.get("target"):
+        foot.append(html.Span(f"◎ {s['target']}", className="gc-target-chip"))
+    foot.append(dmc.Button(
+        "Mark today done" if is_today else "Mark done", size="sm",
+        id={"type": "plan-act", "key": s["key"], "act": "done-today"},
+        n_clicks=0, className="gc-focus-cta"))
     body = [
         html.Div([
             html.Span("Today" if is_today else f"Next · {when}", className="gc-today-when"),
             dmc.Badge(s["type"], color=TYPE_COLOR.get(typ, "gray"), variant="light",
                       size="sm"),
-        ], className="gc-today-head"),
-        html.Div(s.get("description", ""), className="gc-today-desc"),
+        ], className="gc-focus-top"),
+        html.Div(title, className="gc-focus-ttl"),
+        html.Div(sub, className="gc-focus-sub") if sub else None,
+        html.Div(foot, className="gc-focus-foot"),
     ]
-    if s.get("target"):
-        body.append(html.Div(s["target"], className="gc-today-target"))
-    body.append(dmc.Button(
-        "Mark today done" if is_today else "Mark done", size="sm",
-        id={"type": "plan-act", "key": s["key"], "act": "done-today"},
-        n_clicks=0, className="gc-today-cta"))
-    return html.Div(body, className="gc-today" + (" is-today" if is_today else ""))
+    return html.Div(body, className="gc-focus" + (" is-today" if is_today else ""))
 
 
 def _milestones(plan, sched, streak):
@@ -336,16 +346,16 @@ def _milestones(plan, sched, streak):
 
 
 def render_boards(plan):
-    """Progress summary (hero + today + milestones). The week board itself is
-    navigated separately via the prev/next controls, so only this part is
-    re-rendered when overall progress changes."""
+    """Progress summary (stat rail + today's focus card + milestones). The week
+    board itself is navigated separately via the prev/next controls, so only this
+    part is re-rendered when overall progress changes."""
     sched = schedule.build_schedule(plan)
     # Streak reflects consistency within this plan (weeks before it started don't
     # count), so it lines up with plan progress instead of lifetime running.
     plan_start = sched["weeks"][0]["start"] if sched["weeks"] else None
     streak = data.running_streak_weeks(sched["today"], since=plan_start)
     return [
-        _progress_hero(plan, sched, streak),
+        _stat_rail(plan, sched),
         _today_card(sched),
         _milestones(plan, sched, streak),
     ]
