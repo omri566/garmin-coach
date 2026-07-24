@@ -628,6 +628,52 @@ table.mantine-Table-table { font-size: 0.9rem; }
   font-size: 0.68rem; color: var(--muted); text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+/* Plan top cards — stat rail + today focus (redesign, .lavish option C) */
+.gc-rail { display: flex; flex-direction: column; gap: 12px; }
+.gc-rail-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.gc-rail-goal {
+  font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 1.4rem; color: var(--text);
+}
+.gc-rail-enc { color: var(--muted); font-size: 0.9rem; }
+.gc-stat-rail { display: flex; gap: 12px; flex-wrap: wrap; }
+.gc-stat {
+  flex: 1 1 150px; background: var(--panel); border: 1px solid var(--line);
+  border-top: 2px solid var(--amp); border-radius: 12px; padding: 13px 15px;
+}
+.gc-stat .k {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.64rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted);
+}
+.gc-stat .v {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.35rem;
+  color: var(--text); margin-top: 4px;
+}
+.gc-stat .v small { font-size: 0.58em; color: var(--muted); font-weight: 500; letter-spacing: 0.02em; }
+
+.gc-focus {
+  position: relative; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column;
+  gap: 8px; overflow: hidden;
+}
+.gc-focus.is-today {
+  border-color: rgba(255,176,46,0.5); box-shadow: inset 0 0 0 1px rgba(255,176,46,0.12);
+}
+.gc-focus.is-today::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--amp);
+}
+.gc-focus-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.gc-focus-ttl {
+  font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 1.45rem;
+  line-height: 1.12; color: var(--text);
+}
+.gc-focus-sub { color: var(--muted); font-size: 0.95rem; line-height: 1.5; }
+.gc-focus-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.gc-target-chip {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 600;
+  color: var(--amp); background: rgba(255,176,46,0.1); border: 1px solid rgba(255,176,46,0.28);
+  border-radius: 8px; padding: 6px 11px;
+}
+
 .plan-save-row { min-height: 16px; }
 
 @media (prefers-reduced-motion: reduce) {
