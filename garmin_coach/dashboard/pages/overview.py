@@ -5,13 +5,13 @@ import datetime as dt
 import re
 
 import dash_mantine_components as dmc
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
 from garmin_coach.analytics import segments
+from garmin_coach.coach import execution, schedule
 from garmin_coach.coach import plan as plan_mod
 from garmin_coach.coach import recommend as rec_mod
-from garmin_coach.coach import schedule
 from garmin_coach.dashboard import data, figures
 from garmin_coach.dashboard.ui import (
     CARD,
@@ -420,30 +420,72 @@ def _note_view(hit):
 
 def _ai_note_block(r, session):
     """For a structured session, the coach's execution note — a short headline
-    (expandable) if cached, else a button to generate it (one LLM call, cached)."""
+    (expandable) if cached, else a button to generate it (one background LLM call)."""
     if not (session and _is_structured(session.get("type"))):
         return None
-    from garmin_coach.coach import execution
-    hit = execution.cached(r.get("activity_id"))
-    body = (_note_view(hit) if hit
-            else dmc.Button("Coach's read of this workout →", id="last-run-ai-btn",
-                            variant="light", size="xs"))
+    aid = r.get("activity_id")
+    st = execution.note_state(aid)
+    if st.get("state") == "done":
+        body = _note_view(execution.cached(aid))
+    elif st.get("state") == "running":
+        body = _ai_reading_view(aid)            # a read is already in flight → resume polling
+    else:
+        body = dmc.Button("Coach's read of this workout →", id="last-run-ai-btn",
+                          variant="light", size="xs")
     return html.Div([
         dmc.Divider(my="sm"),
         dmc.Text("Coach's read", size="xs", c="dimmed", tt="uppercase", fw=600, mb=6),
-        dcc.Loading(html.Div(body, id="last-run-ai-out"), type="dot", color="#FFB02E"),
+        html.Div(body, id="last-run-ai-out"),
     ])
+
+
+def _ai_reading_view(aid):
+    """The 'reading…' placeholder: a small loader plus the poll Interval + the
+    activity id, so the background read's result can swap in when ready."""
+    return dmc.Group([
+        dcc.Store(id="last-run-ai-aid", data=aid),
+        dcc.Interval(id="last-run-ai-poll", interval=2000),
+        dmc.Loader(size="sm", color="#FFB02E"),
+        dmc.Text("Reading your workout…", size="sm", c="dimmed"),
+    ], gap="sm")
+
+
+def _ai_error_view(msg):
+    return dmc.Stack([
+        dmc.Text("Couldn't read this workout", size="sm", fw=600),
+        dmc.Text((msg or "")[:200], size="xs", c="dimmed"),
+        dmc.Button("Try again", id="last-run-ai-btn", variant="light", size="xs"),
+    ], gap=6)
 
 
 @callback(Output("last-run-ai-out", "children"),
           Input("last-run-ai-btn", "n_clicks"), prevent_initial_call=True)
 def _generate_ai_note(_n):
-    from garmin_coach.coach import execution
-    r = data.last_run()
-    session = _matched_session(r)
-    if not (r and session):
+    # A dynamically-injected button fires its own callback under prevent_initial_call
+    # (n_clicks resets to 0/None) — ignore that so we only read on a real click.
+    if not _n:
         raise PreventUpdate
-    return _note_view(execution.make_note(session, r, data.run_streams(r["activity_id"])))
+    r = data.last_run()
+    if not r:
+        raise PreventUpdate
+    session = _matched_session(r)
+    execution.start_note(r, session, data.run_streams(r["activity_id"]))
+    return _ai_reading_view(r["activity_id"])
+
+
+@callback(Output("last-run-ai-out", "children", allow_duplicate=True),
+          Input("last-run-ai-poll", "n_intervals"),
+          State("last-run-ai-aid", "data"), prevent_initial_call=True)
+def _poll_ai_note(_n, aid):
+    """Swap the 'reading…' placeholder for the note (or an error) once the
+    background read finishes; keep waiting otherwise. Never spins forever — a stuck
+    read past the cap surfaces as an error via note_state."""
+    st = execution.note_state(aid)
+    if st.get("state") == "done":
+        return _note_view(execution.cached(aid))
+    if st.get("state") == "error":
+        return _ai_error_view(st.get("error"))
+    raise PreventUpdate
 
 
 def last_run_section():
