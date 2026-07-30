@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 
 from garmin_coach import config
 from garmin_coach.analytics import segments
@@ -113,3 +114,76 @@ def ensure_note(run: dict, session: dict | None, streams, provider=None,
     if hit:
         return hit
     return make_note(session, run, streams, provider=provider, model=model)
+
+
+# --- Async generation ------------------------------------------------------
+# The coach-read is one LLM call, which can take a while; running it inside the
+# web request would tie up (and, past the server's request timeout, kill) the
+# worker — leaving the UI spinner going forever. So the dashboard kicks it off in a
+# background thread and polls `note_state`. Status lives on disk (per activity) so a
+# multi-worker gunicorn can't lose track of an in-flight/failed read; a finished
+# read is signalled by the note cache itself.
+
+_NOTE_MAX_S = 300            # past this a 'running' read is treated as timed out
+_note_lock = threading.Lock()
+
+
+def _status_path(aid):
+    return _DIR / f"{aid}.status.json"
+
+
+def _write_status(aid, state: str, error: str | None = None) -> None:
+    _DIR.mkdir(parents=True, exist_ok=True)
+    _status_path(aid).write_text(json.dumps(
+        {"state": state, "error": error, "ts": dt.datetime.now().isoformat()}))
+
+
+def _status_age(st: dict) -> float:
+    try:
+        return (dt.datetime.now() - dt.datetime.fromisoformat(st["ts"])).total_seconds()
+    except (KeyError, ValueError, TypeError):
+        return 1e9
+
+
+def note_state(aid) -> dict:
+    """Where the async coach-read stands: ``done`` once the note is cached, else the
+    on-disk ``running``/``error`` status (a stale ``running`` past the cap becomes
+    ``error``), else ``idle``."""
+    if cached(aid):
+        return {"state": "done"}
+    p = _status_path(aid)
+    if not p.exists():
+        return {"state": "idle"}
+    try:
+        st = json.loads(p.read_text())
+    except (OSError, ValueError):
+        return {"state": "idle"}
+    if st.get("state") == "running" and _status_age(st) > _NOTE_MAX_S:
+        return {"state": "error", "error": "Reading this workout took too long."}
+    return st
+
+
+def start_note(run: dict, session: dict | None, streams, provider=None,
+               model: str | None = None) -> None:
+    """Generate the coach-read in a background thread (never blocks the request).
+    Writes the note to the disk cache on success, an error status on failure.
+    Idempotent: an already-cached note, or a fresh read already running, is a no-op."""
+    aid = run.get("activity_id")
+    if aid is None:
+        return
+    with _note_lock:
+        st = note_state(aid)
+        if st.get("state") == "done":
+            return
+        if st.get("state") == "running" and _status_age(st) < _NOTE_MAX_S:
+            return
+        _write_status(aid, "running")
+
+    def _work():
+        try:
+            make_note(session, run, streams, provider=provider, model=model)
+            _status_path(aid).unlink(missing_ok=True)   # cached() now signals 'done'
+        except Exception as e:  # noqa: BLE001 — captured for the poll to surface
+            _write_status(aid, "error", f"{type(e).__name__}: {e}")
+
+    threading.Thread(target=_work, daemon=True).start()
