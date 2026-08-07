@@ -90,6 +90,27 @@ def test_start_note_surfaces_errors():
     assert "cli exploded" in st["error"]
 
 
+def test_work_window_matches_planned_rep_length(monkeypatch):
+    """The coach must measure the work over the *planned* rep length (8 min → 480s),
+    not a fixed 5-min window — otherwise it calls proper 8-min reps 'too short'.
+    An unplanned run keeps the generic 5-min window."""
+    seen = []
+    monkeypatch.setattr(execution.segments, "best_sustained",
+                        lambda s, sec: (seen.append(sec) or
+                                        {"pace_s_km": 308, "hr": 165, "seconds": sec,
+                                         "minutes": round(sec / 60)}))
+    monkeypatch.setattr(execution.segments, "km_splits", lambda s: [])
+    fake = FakeProvider({"headline": "Nailed the reps", "detail": "8-min reps on target."})
+    planned = {"type": "tempo", "target": "WU 2 km + 3×8min @ 5:20/km + CD", "description": ""}
+    execution.make_note(planned, {"activity_id": 55, "distance_m": 9000,
+                                  "avg_pace_s_km": 390, "avg_hr": 150},
+                        streams=object(), provider=fake)
+    execution.make_note(None, {"activity_id": 56, "distance_m": 5000,
+                               "avg_pace_s_km": 330, "avg_hr": 150},
+                        streams=object(), provider=fake)
+    assert seen == [480, 300]      # planned → 8-min rep length; unplanned → generic 5-min
+
+
 def test_start_note_is_a_noop_when_already_cached():
     fake = FakeProvider({"headline": "h", "detail": "d"})
     run = {"activity_id": 23, "distance_m": 4000, "avg_pace_s_km": 400, "avg_hr": 140}
