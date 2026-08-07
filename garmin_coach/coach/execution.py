@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import threading
 
 from garmin_coach import config
@@ -45,6 +46,16 @@ def _pace(s) -> str:
     return f"{int(s // 60)}:{int(s % 60):02d}/km" if s else "—"
 
 
+def _rep_seconds(text: str) -> int:
+    """Planned work-rep length in seconds parsed from a target ('3×8 min' → 480s),
+    clamped 1–15 min; ~5 min if unreadable. This must match the deterministic
+    'Versus plan' verdict (overview `_rep_seconds`) so the coach measures the work
+    over the *same* window — otherwise it mistakes a fixed analysis window for the
+    rep duration and claims the reps 'never got long enough'."""
+    m = re.search(r"(\d+)\s*min", text or "")
+    return max(60, min(900, int(m.group(1)) * 60)) if m else 300
+
+
 def _path(aid):
     return _DIR / f"{aid}.json"
 
@@ -66,31 +77,53 @@ def make_note(session: dict | None, run: dict, streams, provider=None,
     `session` is the matched planned session, or None for an unplanned run."""
     aid = run.get("activity_id")
     provider = provider or get_provider("claude")
-    seg = segments.best_sustained(streams, 300)
     splits = segments.km_splits(streams)
-    seg_txt = (f"fastest sustained {seg['minutes']} min at {_pace(seg['pace_s_km'])}"
-               f" (HR {seg['hr'] and round(seg['hr'])})" if seg else "n/a")
     split_txt = " · ".join(_pace(s) for s in splits) if splits else "n/a"
-    ran = (f"What they ran: {(run.get('distance_m') or 0) / 1000:.1f} km, "
-           f"average {_pace(run.get('avg_pace_s_km'))}, avg HR "
-           f"{run.get('avg_hr') and round(run['avg_hr'])}.\n"
-           f"Hardest effort: {seg_txt}.\n"
-           f"Per-km splits: {split_txt}.\n\n")
+    avg_txt = (
+        "Whole-run average (includes warm-up, recovery jogs and cool-down — expected "
+        "to be slower than rep pace): "
+        f"{(run.get('distance_m') or 0) / 1000:.1f} km, "
+        f"{_pace(run.get('avg_pace_s_km'))}, avg HR {run.get('avg_hr') and round(run['avg_hr'])}.\n")
+
     if session:
         target = f"{session.get('target', '')} — {session.get('description', '')}".strip(" —")
+        # Measure the work over the *planned rep length* (e.g. 8 min), not a fixed
+        # 5-min window — otherwise the coach mistakes the analysis window for the rep
+        # duration and wrongly concludes the reps were too short / 'chopped up'. This
+        # matches the deterministic 'Versus plan' badge.
+        seg = segments.best_sustained(streams, _rep_seconds(target))
+        seg_txt = (
+            f"Best {seg['minutes']}-min work segment, measured over the planned rep "
+            f"length: {_pace(seg['pace_s_km'])} at HR {seg['hr'] and round(seg['hr'])}."
+            if seg else "Work segment: no per-second data to read the reps.")
         prompt = (
-            f"Planned session ({session.get('type')}): {target}\n" + ran +
-            "Give a short headline verdict + a 1-2 sentence detail on how well they "
-            "executed THIS workout — reference the pace/HR, and (for a hard session) "
-            "don't be fooled by the average."
+            f"Planned session ({session.get('type')}): {target}\n"
+            + avg_txt
+            + seg_txt + "\n"
+            + f"Per-km splits: {split_txt}.\n\n"
+            "Judge how well they executed the WORK against the plan using the work-"
+            "segment pace/HR above (NOT the whole-run average). The work segment is "
+            "already measured over the planned rep length, so it reflects the reps — "
+            "do NOT infer the reps were only that long. The per-km splits naturally "
+            "alternate fast/slow because reps and recovery jogs land in different "
+            "kilometres; that's the normal shape of an interval/tempo session, so "
+            "don't read it as the work being 'chopped up' or the reps too short. Give "
+            "a short headline verdict + a 1-2 sentence detail on the actual work pace/HR."
         )
     else:
         target = ""
+        seg = segments.best_sustained(streams, 300)
+        seg_txt = (f"Fastest sustained 5 min at {_pace(seg['pace_s_km'])} "
+                   f"(HR {seg['hr'] and round(seg['hr'])})." if seg
+                   else "Fastest sustained effort: no per-second data.")
         decoup = run.get("decoupling_pct")
         prompt = (
-            "This run was not part of the plan (an extra/unplanned run).\n" + ran +
-            (f"Aerobic decoupling: {decoup:.1f}%.\n" if decoup is not None else "") +
-            "Give a short headline verdict + a 1-2 sentence detail on how the run "
+            "This run was not part of the plan (an extra/unplanned run).\n"
+            + avg_txt
+            + seg_txt + "\n"
+            + f"Per-km splits: {split_txt}.\n"
+            + (f"Aerobic decoupling: {decoup:.1f}%.\n" if decoup is not None else "")
+            + "\nGive a short headline verdict + a 1-2 sentence detail on how the run "
             "went on its own terms — pacing, effort, and durability."
         )
     res = provider.generate_json(prompt, NOTE_SCHEMA, system=SYSTEM, model=model)
