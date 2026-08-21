@@ -232,25 +232,44 @@ def last_run_card():
                          **({"c": value_color} if value_color else {}))
         return dmc.Group([label, value], justify="space-between", w="100%")
 
+    def num(v, spec="{:.0f}", suffix=""):
+        """Format a metric, or a dash when Garmin didn't record it — a run can be
+        missing HR, distance, or some/all running-dynamics fields (treadmill, no
+        pod, structured workout), and an unguarded f-string on a None takes down the
+        whole dashboard (NoneType.__format__)."""
+        return f"{spec.format(v)}{suffix}" if v is not None else "—"
+
+    # Running dynamics: show only the fields this run actually has (each guarded).
     dyn = []
-    if r.get("avg_vert_ratio"):
-        dyn = [
-            row("Cadence", f"{r['avg_cadence_spm']:.0f} spm", "cadence"),
-            row("Vertical ratio", f"{r['avg_vert_ratio']:.1f} %", "vert_ratio"),
-            row("Ground contact", f"{r['avg_gct_ms']:.0f} ms ({r['avg_gct_balance']:.1f}% L)", "gct"),
-            row("Step length", f"{r['avg_step_len_mm']:.0f} mm", "step_len"),
-        ]
+    if r.get("avg_cadence_spm") is not None:
+        dyn.append(row("Cadence", num(r["avg_cadence_spm"], suffix=" spm"), "cadence"))
+    if r.get("avg_vert_ratio") is not None:
+        dyn.append(row("Vertical ratio", num(r["avg_vert_ratio"], "{:.1f}", " %"), "vert_ratio"))
+    if r.get("avg_gct_ms") is not None:
+        bal = r.get("avg_gct_balance")
+        gtxt = f"{r['avg_gct_ms']:.0f} ms" + (f" ({bal:.1f}% L)" if bal is not None else "")
+        dyn.append(row("Ground contact", gtxt, "gct"))
+    if r.get("avg_step_len_mm") is not None:
+        dyn.append(row("Step length", num(r["avg_step_len_mm"], suffix=" mm"), "step_len"))
+
     decoup = r.get("decoupling_pct")
     decoup_c = figures.RED if decoup and decoup > 5 else figures.GREEN
+    if r.get("avg_hr") is not None and r.get("max_hr") is not None:
+        hr_txt = f"{r['avg_hr']:.0f} / {r['max_hr']:.0f} bpm"
+    elif r.get("avg_hr") is not None:
+        hr_txt = f"{r['avg_hr']:.0f} bpm"
+    else:
+        hr_txt = "—"
+    dist_km = r["distance_m"] / 1000 if r.get("distance_m") is not None else None
     return dmc.Card([
         dmc.Group([
             dmc.Text(r["name"], fw=700, size="lg"),
             dmc.Badge(r["start_time"][:10], variant="light"),
         ], justify="space-between"),
         dmc.Divider(my="sm"),
-        row("Distance", f"{r['distance_m']/1000:.1f} km"),
+        row("Distance", num(dist_km, "{:.1f}", " km")),
         row("Pace", fmt_pace(r.get("avg_pace_s_km")), "pace"),
-        row("Avg / Max HR", f"{r['avg_hr']:.0f} / {r['max_hr']:.0f} bpm"),
+        row("Avg / Max HR", hr_txt),
         row("Efficiency (EF)", f"{r['ef']:.2f}" if r.get("ef") else "—", "ef"),
         row("Decoupling", f"{decoup:.1f} %" if decoup is not None else "—",
             "decoupling", value_color=decoup_c),
